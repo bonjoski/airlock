@@ -6,17 +6,15 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/bonjoski/airlock/pkg/audit"
 	"github.com/bonjoski/airlock/pkg/sandbox"
+	"github.com/bonjoski/airlock/pkg/shim"
 )
 
 const version = "0.1.0"
-
-var supportedShims = []string{
-	"npm", "npx", "pnpm", "yarn", "pip", "pip3", "cargo", "uv", "bun",
-}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -147,6 +145,22 @@ func handleRun(args []string) {
 		}
 	}
 
+	// 3. Open structured audit logger (~/.airlock/audit.log)
+	auditLogger, auditErr := audit.NewDefaultLogger()
+	if auditErr != nil {
+		// Non-fatal: warn but proceed without telemetry
+		fmt.Fprintf(os.Stderr, "airlock: warning: failed to open audit log: %v\n", auditErr)
+		auditLogger = nil
+	}
+	if auditLogger != nil {
+		defer func() { _ = auditLogger.Close() }()
+	}
+
+	var effectiveLogger audit.Logger = &audit.NopLogger{}
+	if auditLogger != nil {
+		effectiveLogger = auditLogger
+	}
+
 	opts := sandbox.Options{
 		WorkspaceRoot:  workspace,
 		Airgap:         airgap,
@@ -155,6 +169,7 @@ func handleRun(args []string) {
 		KeepEnv:        keptEnvVars,
 		NonInteractive: nonInteractive,
 		ScratchBase:    scratchBase,
+		AuditLogger:    effectiveLogger,
 		Stdout:         os.Stdout,
 		Stderr:         os.Stderr,
 		Stdin:          os.Stdin,
@@ -167,7 +182,26 @@ func handleRun(args []string) {
 	}
 
 	ctx := context.Background()
+	start := time.Now()
 	exitCode, err := engine.Execute(ctx, cmdArgs)
+
+	_ = effectiveLogger.LogExecution(audit.ExecutionRecord{
+		Command:        cmdArgs[0],
+		Args:           cmdArgs[1:],
+		WorkspaceRoot:  workspace,
+		Airgap:         airgap,
+		AllowDirectNet: allowDirectNet,
+		AllowedDomains: extraDomains,
+		DurationMs:     time.Since(start).Milliseconds(),
+		ExitCode:       exitCode,
+		Error: func() string {
+			if err != nil {
+				return err.Error()
+			}
+			return ""
+		}(),
+	})
+
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "airlock: execution failed: %v\n", err)
 		os.Exit(exitCode)
@@ -178,7 +212,7 @@ func handleRun(args []string) {
 
 func handleShim(args []string) {
 	if len(args) == 0 {
-		fmt.Println("Usage: airlock shim [install|uninstall] [--target <dir>]")
+		fmt.Println("Usage: airlock shim [install|uninstall|list] [--target <dir>]")
 		return
 	}
 
@@ -192,44 +226,55 @@ func handleShim(args []string) {
 		}
 	}
 
+	mgr := shim.NewManager()
+
 	if targetDir == "" {
-		home, err := os.UserHomeDir()
+		def, err := mgr.DefaultShimDir()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "airlock: failed to get user home: %v\n", err)
+			fmt.Fprintf(os.Stderr, "airlock: failed to get shim directory: %v\n", err)
 			os.Exit(1)
 		}
-		targetDir = filepath.Join(home, ".airlock", "bin")
+		targetDir = def
 	}
 
 	switch action {
 	case "install":
-		if err := os.MkdirAll(targetDir, 0755); err != nil {
-			fmt.Fprintf(os.Stderr, "airlock: failed to create shim directory: %v\n", err)
+		installed, err := mgr.Install(targetDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "airlock: failed to install shims: %v\n", err)
 			os.Exit(1)
 		}
-
-		for _, tool := range supportedShims {
-			shimPath := filepath.Join(targetDir, tool)
-			content := fmt.Sprintf("#!/bin/sh\n# Airlock transparent shim for %s\nexec airlock %s \"$@\"\n", tool, tool)
-			if err := os.WriteFile(shimPath, []byte(content), 0755); err != nil {
-				fmt.Fprintf(os.Stderr, "airlock: failed to write shim %s: %v\n", tool, err)
-				os.Exit(1)
-			}
-		}
-		fmt.Printf("Installed Airlock shims in: %s\n", targetDir)
+		fmt.Printf("Installed %d Airlock shims in: %s\n", len(installed), targetDir)
 		fmt.Println("To activate shims, prepend this directory to your PATH:")
 		fmt.Printf("  export PATH=\"%s:$PATH\"\n", targetDir)
 
 	case "uninstall":
-		for _, tool := range supportedShims {
-			shimPath := filepath.Join(targetDir, tool)
-			if err := os.Remove(shimPath); err != nil && !os.IsNotExist(err) {
-				fmt.Fprintf(os.Stderr, "airlock: warning: failed to remove shim %s: %v\n", tool, err)
-			}
+		if err := mgr.Uninstall(targetDir); err != nil {
+			fmt.Fprintf(os.Stderr, "airlock: failed to uninstall shims: %v\n", err)
+			os.Exit(1)
 		}
 		fmt.Printf("Uninstalled Airlock shims from: %s\n", targetDir)
 
+	case "list":
+		statuses, err := mgr.List(targetDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "airlock: failed to list shims: %v\n", err)
+			os.Exit(1)
+		}
+		for _, s := range statuses {
+			state := "[ ]"
+			if s.Installed {
+				state = "[✓]"
+			}
+			hostBin := s.TargetHostBinary
+			if hostBin == "" {
+				hostBin = "(not found on PATH)"
+			}
+			fmt.Printf("%s %-10s → %s\n", state, s.Tool, hostBin)
+		}
+
 	default:
-		fmt.Printf("Unknown shim action: %s. Use 'install' or 'uninstall'.\n", action)
+		fmt.Printf("Unknown shim action: %s. Use 'install', 'uninstall', or 'list'.\n", action)
 	}
 }
+

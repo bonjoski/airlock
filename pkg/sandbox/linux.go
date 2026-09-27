@@ -238,7 +238,7 @@ func (l *LinuxEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 	// 4. Start Egress Proxy (unless in airgap mode or direct network mode)
 	var prx proxy.Proxy
 	if !l.opts.Airgap && !l.opts.AllowDirectNet {
-		p, err := proxy.New(l.opts.AllowedDomains)
+		p, err := proxy.NewWithLogger(l.opts.AllowedDomains, l.opts.AuditLogger)
 		if err != nil {
 			return 1, fmt.Errorf("sandbox: failed to start egress proxy: %w", err)
 		}
@@ -249,8 +249,12 @@ func (l *LinuxEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 	}
 
 	proxyURL := ""
+	dnsAddr := ""
 	if prx != nil {
 		proxyURL = prx.URL()
+		if dp := prx.DNSPort(); dp > 0 {
+			dnsAddr = fmt.Sprintf("127.0.0.1:%d", dp)
+		}
 	}
 
 	// 5. Generate Seccomp-BPF Filter File (Target 2)
@@ -279,11 +283,12 @@ func (l *LinuxEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 
 	// 7. Sanitize Environment (V-07)
 	envConfig := env.Config{
-		VirtualHome:  sc.HomeDir(),
-		ScratchDir:   sc.TmpDir(),
-		StagingCache: sc.CacheStagingDir(),
-		ProxyURL:     proxyURL,
-		KeepEnv:      l.opts.KeepEnv,
+		VirtualHome:        sc.HomeDir(),
+		ScratchDir:         sc.TmpDir(),
+		StagingCache:       sc.CacheStagingDir(),
+		ProxyURL:           proxyURL,
+		DNSResolverAddress: dnsAddr,
+		KeepEnv:            l.opts.KeepEnv,
 	}
 	sanitizer := env.NewSanitizer(envConfig)
 	sanitizedEnv := sanitizer.Sanitize(os.Environ())

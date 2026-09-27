@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/bonjoski/airlock/pkg/audit"
 )
 
 // Options holds runtime parameters for sandboxed execution.
@@ -20,6 +22,7 @@ type Options struct {
 	KeepEnv        []string
 	NonInteractive bool
 	ScratchBase    string
+	AuditLogger    audit.Logger // Optional structured telemetry logger
 	Stdout         io.Writer
 	Stderr         io.Writer
 	Stdin          io.Reader

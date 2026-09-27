@@ -79,7 +79,7 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 	// 4. Start Egress Proxy (unless in airgap mode or direct network mode)
 	var prx proxy.Proxy
 	if !m.opts.Airgap && !m.opts.AllowDirectNet {
-		p, err := proxy.New(m.opts.AllowedDomains)
+		p, err := proxy.NewWithLogger(m.opts.AllowedDomains, m.opts.AuditLogger)
 		if err != nil {
 			return 1, fmt.Errorf("sandbox: failed to start egress proxy: %w", err)
 		}
@@ -91,9 +91,13 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 
 	proxyPort := 0
 	proxyURL := ""
+	dnsAddr := ""
 	if prx != nil {
 		proxyPort = prx.Port()
 		proxyURL = prx.URL()
+		if dp := prx.DNSPort(); dp > 0 {
+			dnsAddr = fmt.Sprintf("127.0.0.1:%d", dp)
+		}
 	}
 
 	// 5. Generate Hardened Seatbelt Scheme Profile
@@ -118,11 +122,12 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 
 	// 6. Sanitize Environment (V-07: Strict POSIX allowlist, clean PATH, virtual paths)
 	envConfig := env.Config{
-		VirtualHome:  sc.HomeDir(),
-		ScratchDir:   sc.TmpDir(),
-		StagingCache: sc.CacheStagingDir(),
-		ProxyURL:     proxyURL,
-		KeepEnv:      m.opts.KeepEnv,
+		VirtualHome:        sc.HomeDir(),
+		ScratchDir:         sc.TmpDir(),
+		StagingCache:       sc.CacheStagingDir(),
+		ProxyURL:           proxyURL,
+		DNSResolverAddress: dnsAddr,
+		KeepEnv:            m.opts.KeepEnv,
 	}
 
 	sanitizer := env.NewSanitizer(envConfig)

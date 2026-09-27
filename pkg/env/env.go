@@ -28,11 +28,12 @@ var SafeEnvAllowlist = map[string]bool{
 
 // Config specifies options for environment sanitization.
 type Config struct {
-	VirtualHome  string   // Path to ephemeral virtual $HOME directory
-	ScratchDir   string   // Path to ephemeral scratch space ($TMPDIR)
-	StagingCache string   // Path to isolated cache staging directory
-	ProxyURL     string   // Optional proxy URL, e.g. "http://127.0.0.1:18443"
-	KeepEnv      []string // Additional variables explicitly allowed by user
+	VirtualHome        string   // Path to ephemeral virtual $HOME directory
+	ScratchDir         string   // Path to ephemeral scratch space ($TMPDIR)
+	StagingCache       string   // Path to isolated cache staging directory
+	ProxyURL           string   // Optional proxy URL, e.g. "http://127.0.0.1:18443"
+	DNSResolverAddress string   // Optional in-process DNS interceptor address, e.g. "127.0.0.1:5353"
+	KeepEnv            []string // Additional variables explicitly allowed by user
 }
 
 // Sanitizer provides an interface for environment transformation.
@@ -123,6 +124,11 @@ func (s *DefaultSanitizer) Sanitize(hostEnv []string) []string {
 		)
 	}
 
+	// Inject DNS interceptor address for tools that honour it
+	if s.config.DNSResolverAddress != "" {
+		result = append(result, "AIRLOCK_DNS="+s.config.DNSResolverAddress)
+	}
+
 	// Export nesting sentinel to prevent recursive sandboxing crashes in agent loops
 	result = append(result, "__AIRLOCK_ACTIVE=1")
 
@@ -148,6 +154,11 @@ func SanitizePath(pathVar string) string {
 
 		clean := filepath.Clean(entry)
 		if clean == "/" {
+			continue
+		}
+
+		// Strip .airlock/bin to prevent child processes from calling back into shims
+		if strings.HasSuffix(clean, filepath.Join(".airlock", "bin")) {
 			continue
 		}
 

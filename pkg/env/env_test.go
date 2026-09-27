@@ -108,3 +108,37 @@ func TestSanitizePath(t *testing.T) {
 		t.Errorf("Expected %q, got %q", expected, clean)
 	}
 }
+
+func TestSanitizePath_ShimDirStripped(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	shimDir := home + "/.airlock/bin"
+	input := shimDir + ":/usr/bin:/bin"
+	clean := SanitizePath(input)
+	if strings.Contains(clean, shimDir) {
+		t.Errorf("Expected .airlock/bin to be stripped from PATH, got: %q", clean)
+	}
+	if !strings.Contains(clean, "/usr/bin") {
+		t.Errorf("Expected /usr/bin to be present, got: %q", clean)
+	}
+}
+
+func TestSanitizer_DNSResolverInjection(t *testing.T) {
+	cfg := Config{
+		ProxyURL:           "http://127.0.0.1:18443",
+		DNSResolverAddress: "127.0.0.1:5353",
+	}
+	sanitizer := NewSanitizer(cfg)
+	sanitized := sanitizer.Sanitize([]string{"TERM=xterm"})
+
+	envMap := make(map[string]string)
+	for _, entry := range sanitized {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	if envMap["AIRLOCK_DNS"] != "127.0.0.1:5353" {
+		t.Errorf("Expected AIRLOCK_DNS to be set, got %q", envMap["AIRLOCK_DNS"])
+	}
+}
