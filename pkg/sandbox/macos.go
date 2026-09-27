@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bonjoski/airlock/pkg/cache"
 	"github.com/bonjoski/airlock/pkg/env"
 	"github.com/bonjoski/airlock/pkg/proxy"
 	"github.com/bonjoski/airlock/pkg/pty"
@@ -21,6 +22,7 @@ import (
 // MacOSEngine executes commands under macOS Seatbelt process confinement.
 type MacOSEngine struct {
 	opts      Options
+	cacheMgr  cache.Manager
 	generator seatbelt.Generator
 	detector  pty.Detector
 }
@@ -32,6 +34,7 @@ func NewMacOSEngine(opts Options) (*MacOSEngine, error) {
 	}
 	return &MacOSEngine{
 		opts:      opts,
+		cacheMgr:  cache.NewManager(),
 		generator: seatbelt.NewGenerator(),
 		detector:  pty.NewDetector(),
 	}, nil
@@ -161,15 +164,24 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 
 	// 10. Wait for Termination and Forward Exit Code
 	err = cmd.Wait()
+	exitCode := 0
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return exitErr.ExitCode(), nil
+			exitCode = exitErr.ExitCode()
+		} else {
+			return 1, err
 		}
-		return 1, err
 	}
 
-	return 0, nil
+	// 11. Post-Execution Cache Synchronization (V-12: Zero Cold-Start Performance)
+	if exitCode == 0 {
+		if syncErr := m.cacheMgr.SyncBack(sc.CacheStagingDir(), homeDir); syncErr != nil {
+			fmt.Fprintf(m.resolveStderr(), "airlock: warning: failed to sync staging cache: %v\n", syncErr)
+		}
+	}
+
+	return exitCode, nil
 }
 
 func (m *MacOSEngine) resolveStdout() io.Writer {

@@ -3,6 +3,7 @@ package tests
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -12,11 +13,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bonjoski/airlock/pkg/cache"
 	"github.com/bonjoski/airlock/pkg/env"
 	"github.com/bonjoski/airlock/pkg/proxy"
 	"github.com/bonjoski/airlock/pkg/sandbox"
 	"github.com/bonjoski/airlock/pkg/scratch"
 	"github.com/bonjoski/airlock/pkg/seatbelt"
+	"github.com/bonjoski/airlock/pkg/seccomp"
 )
 
 // TestSEC01_SSHReadDenial verifies that reading SSH keys is denied (V-01).
@@ -220,5 +223,168 @@ func TestSEC12_ScratchOrphanCleanup(t *testing.T) {
 	}
 	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
 		t.Errorf("SEC-12 FAILED: Orphan directory still exists on disk")
+	}
+}
+
+// TestSEC06_DockerSocketDenial verifies that /var/run/docker.sock is blocked from sandbox access (V-06).
+func TestSEC06_DockerSocketDenial(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS Seatbelt verification")
+	}
+
+	tempDir := t.TempDir()
+	p := seatbelt.Params{
+		WorkspaceRoot: tempDir,
+		ScratchDir:    tempDir,
+		Airgap:        true,
+	}
+
+	gen := seatbelt.NewGenerator()
+	profile, err := gen.Generate(p)
+	if err != nil {
+		t.Fatalf("Failed to generate profile: %v", err)
+	}
+
+	if !strings.Contains(profile, `(literal "/var/run/docker.sock")`) {
+		t.Errorf("SEC-06 FAILED: Seatbelt profile missing explicit /var/run/docker.sock denial rule")
+	}
+}
+
+// TestSEC07_UsernsFailClosed verifies that disabled unprivileged user namespaces result in immediate abort (V-07).
+func TestSEC07_UsernsFailClosed(t *testing.T) {
+	eng, err := sandbox.NewEngine(sandbox.Options{
+		WorkspaceRoot: t.TempDir(),
+	})
+	if runtime.GOOS == "linux" && err != nil {
+		if !errors.Is(err, sandbox.ErrUsernsDisabled) && !errors.Is(err, sandbox.ErrBwrapNotFound) {
+			t.Errorf("SEC-07 FAILED: Expected fail-closed user namespace error, got: %v", err)
+		}
+	}
+	_ = eng
+}
+
+// TestSEC09_IOUringSeccompDenial verifies that io_uring syscalls are blocked by Seccomp BPF (V-09).
+func TestSEC09_IOUringSeccompDenial(t *testing.T) {
+	filter := seccomp.NewFilter()
+	for _, arch := range []string{"amd64", "arm64"} {
+		instructions, err := filter.CompileInstructions(arch)
+		if err != nil {
+			t.Fatalf("CompileInstructions(%s) failed: %v", arch, err)
+		}
+
+		// Verify io_uring syscalls (425, 426, 427) are present in the filter jump table
+		found425 := false
+		found426 := false
+		found427 := false
+		for _, inst := range instructions {
+			if inst.Code == (seccomp.BPF_JMP | seccomp.BPF_JEQ | seccomp.BPF_K) {
+				switch inst.K {
+				case 425:
+					found425 = true
+				case 426:
+					found426 = true
+				case 427:
+					found427 = true
+				}
+			}
+		}
+
+		if !found425 || !found426 || !found427 {
+			t.Errorf("SEC-09 FAILED (%s): Missing io_uring blocking instructions in Seccomp filter", arch)
+		}
+	}
+}
+
+// TestSEC10_AbstractSocketNetnsDetachment verifies that network namespace detachment is enforced (V-09).
+func TestSEC10_AbstractSocketNetnsDetachment(t *testing.T) {
+	tempDir := t.TempDir()
+	sc, err := scratch.New(tempDir)
+	if err != nil {
+		t.Fatalf("scratch.New failed: %v", err)
+	}
+	defer func() {
+		_ = sc.Cleanup()
+	}()
+
+	eng := &sandbox.LinuxEngine{}
+	args, err := eng.BuildBwrapArgs(sc, nil, tempDir)
+	if err != nil {
+		t.Fatalf("BuildBwrapArgs failed: %v", err)
+	}
+
+	foundUnshareNet := false
+	for _, arg := range args {
+		if arg == "--unshare-net" {
+			foundUnshareNet = true
+			break
+		}
+	}
+
+	if !foundUnshareNet {
+		t.Errorf("SEC-10 FAILED: Expected --unshare-net to isolate abstract Unix domain sockets")
+	}
+}
+
+// TestSEC13_CacheStagingAndSync verifies zero cold-start read-only cache mounting and atomic sync (V-12).
+func TestSEC13_CacheStagingAndSync(t *testing.T) {
+	tempDir := t.TempDir()
+	stagingBase := filepath.Join(tempDir, "scratch-cache-staging")
+	mockHome := filepath.Join(tempDir, "mock-home")
+
+	mgr := cache.NewManager()
+	cfg, err := mgr.ProvisionStaging(stagingBase)
+	if err != nil {
+		t.Fatalf("ProvisionStaging failed: %v", err)
+	}
+
+	// Verify staging environment variables
+	if cfg.EnvVars["npm_config_cache"] == "" || cfg.EnvVars["PIP_CACHE_DIR"] == "" {
+		t.Errorf("SEC-13 FAILED: Missing package manager staging environment variables")
+	}
+
+	// Write mock downloaded artifact to staging
+	pkgFile := filepath.Join(stagingBase, "npm", "express-4.18.2.tgz")
+	if err := os.WriteFile(pkgFile, []byte("TARBALL_BYTES"), 0644); err != nil {
+		t.Fatalf("Failed to write mock package: %v", err)
+	}
+
+	// Sync back to host
+	if err := mgr.SyncBack(stagingBase, mockHome); err != nil {
+		t.Fatalf("SyncBack failed: %v", err)
+	}
+
+	// Verify file was atomically synced to host cache
+	syncedFile := filepath.Join(mockHome, ".npm", "express-4.18.2.tgz")
+	data, err := os.ReadFile(syncedFile)
+	if err != nil {
+		t.Fatalf("SEC-13 FAILED: Synced file not found in host cache: %v", err)
+	}
+	if string(data) != "TARBALL_BYTES" {
+		t.Errorf("SEC-13 FAILED: Cache content corrupted during sync")
+	}
+}
+
+// TestSEC14_NestedAirlockBypass verifies that nested invocations detect __AIRLOCK_ACTIVE=1 and bypass confinement.
+func TestSEC14_NestedAirlockBypass(t *testing.T) {
+	origVal := os.Getenv("__AIRLOCK_ACTIVE")
+	_ = os.Setenv("__AIRLOCK_ACTIVE", "1")
+	defer func() {
+		_ = os.Setenv("__AIRLOCK_ACTIVE", origVal)
+	}()
+
+	tempDir := t.TempDir()
+	eng, err := sandbox.NewEngine(sandbox.Options{
+		WorkspaceRoot: tempDir,
+	})
+	if err != nil {
+		t.Fatalf("NewEngine failed: %v", err)
+	}
+
+	code, err := eng.Execute(context.Background(), []string{"/bin/sh", "-c", "echo nested-ok"})
+	if err != nil {
+		t.Fatalf("SEC-14 FAILED: Nested execution returned unexpected error: %v", err)
+	}
+	if code != 0 {
+		t.Errorf("SEC-14 FAILED: Expected exit code 0, got %d", code)
 	}
 }

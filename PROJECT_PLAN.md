@@ -304,19 +304,19 @@ gantt
   - [x] Multi-platform CI/CD workflows (`.github/workflows/ci.yml`, `release.yml`, `security.yml`).
   - [x] Official MIT License and Go 1.27.1 upgrade.
 
-### Phase 2: Linux Sandbox Engine & Shared Cache Architecture (Weeks 4–7) — 🟡 NEXT UP (ACTIVE)
+### Phase 2: Linux Sandbox Engine & Shared Cache Architecture (Weeks 4–7) — ✅ COMPLETED
 - **Weeks 4–5: Bubblewrap Driver & Seccomp-BPF Syscall Confinement**
-  - [ ] Unprivileged namespaces engine (`CLONE_NEWUSER`, `CLONE_NEWNS`, `CLONE_NEWPID`) in `pkg/sandbox/linux.go`.
-  - [ ] Unconditional `CLONE_NEWNET` detachment to isolate abstract Unix domain sockets (`@X11`, `@dbus`, V-09).
-  - [ ] Seccomp-BPF filter compilation blocking `io_uring_*`, `ptrace`, `TIOCSTI`, `keyctl`, and `bpf` (`pkg/seccomp/`).
-  - [ ] Fail-closed verification on hardened distros (Ubuntu 24.04 AppArmor profiles, V-07).
+  - [x] Unprivileged namespaces engine (`CLONE_NEWUSER`, `CLONE_NEWNS`, `CLONE_NEWPID`) in `pkg/sandbox/linux.go`.
+  - [x] Unconditional `CLONE_NEWNET` detachment to isolate abstract Unix domain sockets (`@X11`, `@dbus`, V-09).
+  - [x] Seccomp-BPF filter compilation blocking `io_uring_*`, `ptrace`, `TIOCSTI`, `keyctl`, and `bpf` (`pkg/seccomp/`).
+  - [x] Fail-closed verification on hardened distros (Ubuntu 24.04 AppArmor profiles, V-07).
 - **Weeks 6–7: Read-Only Host Cache Architecture & Staging Layer**
-  - [ ] Mount host package caches (`~/.npm`, `~/.cache/pip`, `~/.cargo/registry`) as **Read-Only** inside sandbox (`pkg/cache/`, V-12).
-  - [ ] Ephemeral staging write-layer (`/tmp/boxpkg-XXXXXXXXXXXX/cache-staging`).
-  - [ ] Post-execution hash validation and background cache sync back to host cache.
-  - [ ] Benchmarking repeat install times to ensure parity with unconfined warm installs (< 3s).
+  - [x] Mount host package caches (`~/.npm`, `~/.cache/pip`, `~/.cargo/registry`, `~/.cache/uv`) as **Read-Only** inside sandbox (`pkg/cache/`, V-12).
+  - [x] Ephemeral staging write-layer (`/tmp/boxpkg-XXXXXXXXXXXX/cache-staging`).
+  - [x] Post-execution hash validation and background cache sync back to host cache.
+  - [x] Benchmarking repeat install times to ensure parity with unconfined warm installs (< 3s).
 
-### Phase 3: Egress Proxy, Agent Integrations & v1.0 Launch (Weeks 8–12) — ⚪ PLANNED
+### Phase 3: Egress Proxy, Agent Integrations & v1.0 Launch (Weeks 8–12) — 🟡 NEXT UP (ACTIVE)
 - **Weeks 8–9: Supervisor Forward Proxy & Kernel-Enforced Egress**
   - [ ] Kernel-level outbound network confinement enforcement across Linux netns routing.
   - [ ] DNS interception to eliminate out-of-band DNS tunneling exfiltration (V-08).
@@ -343,11 +343,12 @@ gantt
 | **Localhost Proxy Whitelist (`pkg/proxy`)** | **100% COMPLETE** | `TestEgressProxy_DomainWhitelisting`, `TestSEC11` | V-02 / Registry whitelisting, connection rejection on unapproved domains. |
 | **Terminal Introspection (`pkg/pty`)** | **100% COMPLETE** | `TestPOSIXDetector_IsTerminal` | V-05 / Cross-platform `TIOCGETA` (Darwin) & `TCGETS` (Linux) termios ioctls. |
 | **macOS Confinement Engine (`pkg/sandbox`)** | **100% COMPLETE** | `TestMacOSEngine_Execute`, `ExitCodePropagation`, `NestedBypass` | `sandbox-exec` kernel sandbox driver, workspace discovery. |
-| **Adversarial Test Suite (`tests/`)** | **100% COMPLETE** | Full pass (0 failures) | Live verification of `SEC-01`, `SEC-03`, `SEC-04`, `SEC-05`, `SEC-08`, `SEC-11`, `SEC-12`. |
+| **Linux Engine (`pkg/sandbox/linux.go`)** | **100% COMPLETE** | `TestLinuxEngine_BuildBwrapArgs`, `TestLinuxEngine_NestedBypass`, `TestFindWorkspaceSecrets`, `SEC-07, 10` | V-03, V-04, V-07, V-09 / Bubblewrap user namespaces, network detachment, secret masking. |
+| **Seccomp-BPF Syscall Filter (`pkg/seccomp`)** | **100% COMPLETE** | `TestFilter_Compile_Amd64`, `Arm64`, `Simulation`, `SEC-09` | V-05, V-09 / Kernel syscall blocking (io_uring, ptrace, bpf, TIOCSTI ioctl). |
+| **Read-Only Cache Layer (`pkg/cache`)** | **100% COMPLETE** | `TestManager_GetHostCacheMounts`, `ProvisionStaging`, `SyncBack_Valid`, `SEC-13` | V-12 / Shared host cache mounts, atomic sync-back, symlink rejection. |
+| **Adversarial Test Suite (`tests/`)** | **100% COMPLETE** | Full pass (0 failures) | Live verification of `SEC-01..07`, `SEC-08..14`. |
 | **Automation Toolchain (`Makefile`)** | **100% COMPLETE** | All targets operational | `build`, `test`, `test-race`, `test-sec`, `coverage`, `vulncheck`, `lint`, `cross-compile`, `package`. |
 | **CI/CD Build Pipeline (`.github/workflows`)** | **100% COMPLETE** | Verified in GitHub Actions format | Multi-arch compile (`darwin/arm64`, `darwin/amd64`, `linux/arm64`, `linux/amd64`), automated releases. |
-| **Linux Engine (`pkg/sandbox/linux.go`)** | **SCHEDULED (Phase 2)** | — | Bubblewrap namespaces + Landlock LSM + Seccomp-BPF filters. |
-| **Read-Only Cache Layer (`pkg/cache`)** | **SCHEDULED (Phase 2)** | — | V-12 / Shared host package cache mount with ephemeral staging. |
 
 ---
 

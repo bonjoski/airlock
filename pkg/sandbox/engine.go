@@ -3,6 +3,7 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -47,8 +48,10 @@ func NewEngine(opts Options) (Engine, error) {
 	switch runtime.GOOS {
 	case "darwin":
 		return NewMacOSEngine(opts)
+	case "linux":
+		return NewLinuxEngine(opts)
 	default:
-		return nil, fmt.Errorf("sandbox: operating system %s is not yet supported (Linux engine scheduled for Phase 2)", runtime.GOOS)
+		return nil, fmt.Errorf("sandbox: operating system %s is not supported: %w", runtime.GOOS, errors.ErrUnsupported)
 	}
 }
 

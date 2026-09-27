@@ -104,7 +104,9 @@ func (s *DefaultSanitizer) Sanitize(hostEnv []string) []string {
 	if s.config.StagingCache != "" {
 		result = append(result,
 			"npm_config_cache="+filepath.Join(s.config.StagingCache, "npm"),
+			"YARN_CACHE_FOLDER="+filepath.Join(s.config.StagingCache, "yarn"),
 			"PIP_CACHE_DIR="+filepath.Join(s.config.StagingCache, "pip"),
+			"UV_CACHE_DIR="+filepath.Join(s.config.StagingCache, "uv"),
 			"CARGO_TARGET_DIR="+filepath.Join(s.config.StagingCache, "cargo-target"),
 		)
 	}
