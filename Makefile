@@ -48,6 +48,39 @@ build-debug: ## Build unoptimized debug binary with symbols
 	go build -race -o $(BIN_DIR)/$(BINARY_NAME)-debug $(MAIN_PKG)
 	@echo "==> Debug binary built: $(BIN_DIR)/$(BINARY_NAME)-debug"
 
+.PHONY: cross-compile
+cross-compile: ## Cross-compile release binaries for Darwin and Linux (amd64, arm64)
+	@mkdir -p $(DIST_DIR)
+	@echo "==> Cross-compiling $(BINARY_NAME) $(VERSION)..."
+	@echo "    -> darwin/arm64"
+	@CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)_darwin_arm64 $(MAIN_PKG)
+	@echo "    -> darwin/amd64"
+	@CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)_darwin_amd64 $(MAIN_PKG)
+	@echo "    -> linux/arm64"
+	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)_linux_arm64 $(MAIN_PKG)
+	@echo "    -> linux/amd64"
+	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)_linux_amd64 $(MAIN_PKG)
+	@echo "==> Cross-compilation complete in $(DIST_DIR)/"
+
+.PHONY: package
+package: cross-compile ## Package release tarballs and generate sha256 checksums in dist/
+	@echo "==> Packaging release tarballs..."
+	@for target in darwin_arm64 darwin_amd64 linux_arm64 linux_amd64; do \
+		tar_dir=$(DIST_DIR)/pkg_$$target; \
+		rm -rf $$tar_dir; \
+		mkdir -p $$tar_dir; \
+		cp $(DIST_DIR)/$(BINARY_NAME)_$$target $$tar_dir/$(BINARY_NAME); \
+		ln -sf $(BINARY_NAME) $$tar_dir/$(LEGACY_ALIAS); \
+		[ -f README.md ] && cp README.md $$tar_dir/ || true; \
+		[ -f LICENSE ] && cp LICENSE $$tar_dir/ || true; \
+		tar -czf $(DIST_DIR)/$(BINARY_NAME)_$${target}.tar.gz -C $$tar_dir .; \
+		rm -rf $$tar_dir; \
+	done
+	@echo "==> Generating SHA256 checksums..."
+	@(cd $(DIST_DIR) && shasum -a 256 $(BINARY_NAME)_*.tar.gz > checksums.txt)
+	@echo "==> Packages ready in $(DIST_DIR)/:"
+	@ls -lh $(DIST_DIR)/$(BINARY_NAME)_*.tar.gz $(DIST_DIR)/checksums.txt
+
 .PHONY: test
 test: ## Run all unit and integration tests
 	@echo "==> Running tests..."

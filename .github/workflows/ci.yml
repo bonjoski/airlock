@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-and-security:
+    name: Code Quality & Vulnerability Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Verify Formatting (gofmt)
+        run: make fmt-check
+
+      - name: Go Vet Analysis
+        run: make vet
+
+      - name: Run govulncheck
+        run: make vulncheck
+
+  test-linux:
+    name: Unit & Integration Tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Run Tests with Race Detector & Coverage
+        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Upload Linux Coverage Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-linux
+          path: coverage.out
+          retention-days: 7
+
+  test-macos:
+    name: Sandbox & Adversarial Tests (macOS)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-13]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Run All Tests
+        run: go test -v ./...
+
+      - name: Run Live macOS Seatbelt Adversarial Battery
+        run: make test-sec
+
+  cross-compile:
+    name: Cross-Compilation & Packaging Verification
+    needs: [quality-and-security, test-linux, test-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Cross-Compile & Package All Architectures
+        run: make package
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: airlock-binaries
+          path: |
+            dist/*.tar.gz
+            dist/checksums.txt
+          retention-days: 7

@@ -47,3 +47,9 @@ Standard terminal runs give these scripts unconfined read access to host credent
 ## Project Specification
 
 Detailed PDF specification available in [project_plan.pdf](project_plan.pdf).
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
