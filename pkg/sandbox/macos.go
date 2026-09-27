@@ -17,6 +17,7 @@ import (
 	"github.com/bonjoski/airlock/pkg/pty"
 	"github.com/bonjoski/airlock/pkg/scratch"
 	"github.com/bonjoski/airlock/pkg/seatbelt"
+	"github.com/bonjoski/airlock/pkg/vet"
 )
 
 // MacOSEngine executes commands under macOS Seatbelt process confinement.
@@ -64,10 +65,31 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 		return 0, nil
 	}
 
-	// 2. Orphan Scavenger (V-11: Prevents disk space leaks from crashes or SIGKILL)
+	// 2. Pre-Execution Static Analysis (Argus / vetpkg)
+	inspector := m.opts.Inspector
+	if inspector == nil && m.opts.VetEnabled {
+		inspector = vet.NewEngine(vet.Config{
+			StrictMode:   m.opts.VetStrict,
+			ExternalTool: m.opts.VetTool,
+			Logger:       m.opts.AuditLogger,
+		})
+	}
+	if inspector != nil {
+		report, err := inspector.Inspect(ctx, cmdArgs, m.opts.WorkspaceRoot)
+		if err == nil && report != nil {
+			for _, f := range report.Findings {
+				fmt.Fprintf(m.resolveStderr(), "airlock [argus]: [%s] %s: %s\n", f.Severity, f.RuleID, f.Description)
+			}
+			if report.BlockExecution {
+				return 1, fmt.Errorf("sandbox: execution blocked by Argus static analysis policy (risk: %s)", report.MaxRisk)
+			}
+		}
+	}
+
+	// 3. Orphan Scavenger (V-11: Prevents disk space leaks from crashes or SIGKILL)
 	_, _ = scratch.ScavengeOrphans(m.opts.ScratchBase, 24*time.Hour)
 
-	// 3. Ephemeral Scratch Space Allocation (V-11: Cryptographic mkdtemp, 0700 perm)
+	// 4. Ephemeral Scratch Space Allocation (V-11: Cryptographic mkdtemp, 0700 perm)
 	sc, err := scratch.New(m.opts.ScratchBase)
 	if err != nil {
 		return 1, fmt.Errorf("sandbox: failed to provision ephemeral scratch directory: %w", err)

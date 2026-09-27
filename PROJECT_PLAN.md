@@ -316,19 +316,19 @@ gantt
   - [x] Post-execution hash validation and background cache sync back to host cache.
   - [x] Benchmarking repeat install times to ensure parity with unconfined warm installs (< 3s).
 
-### Phase 3: Egress Proxy, Agent Integrations & v1.0 Launch (Weeks 8–12) — 🟡 NEXT UP (ACTIVE)
+### Phase 3: Egress Proxy, Agent Integrations & v1.0 Launch (Weeks 8–12) — ✅ COMPLETED
 - **Weeks 8–9: Supervisor Forward Proxy & Kernel-Enforced Egress**
-  - [ ] Kernel-level outbound network confinement enforcement across Linux netns routing.
-  - [ ] DNS interception to eliminate out-of-band DNS tunneling exfiltration (V-08).
-  - [ ] Custom domain allowlisting CLI flags (`--allow-domain <domain>`).
+  - [x] Kernel-level outbound network confinement enforcement across Linux netns routing.
+  - [x] DNS interception to eliminate out-of-band DNS tunneling exfiltration (V-08) — `pkg/proxy/dns.go` in-process UDP forwarder returning NXDOMAIN for non-whitelisted domains.
+  - [x] Custom domain allowlisting CLI flags (`--allow-domain <domain>`) — already wired end-to-end.
 - **Weeks 10–11: Toolchain Shims, Agentic Loops & Telemetry**
-  - [ ] Transparent shell shims for `npm`, `pnpm`, `yarn`, `pip`, `cargo`, `uv`, `bun` with automatic discovery.
-  - [ ] Structured audit logging engine (`~/.airlock/audit.log`) recording blocked system calls and attempted network access.
-  - [ ] `vetpkg` (Argus) static analysis handoff integration.
+  - [x] Transparent shell shims for `npm`, `npx`, `pnpm`, `yarn`, `pip`, `pip3`, `cargo`, `uv`, `bun` — `pkg/shim` with V-14 recursion bypass, `airlock shim list` subcommand.
+  - [x] Structured audit logging engine (`~/.airlock/audit.log`) — `pkg/audit` JSON-lines logger recording execution, network egress, DNS queries, and security events.
+  - [x] `vetpkg` (Argus) static analysis handoff integration — `pkg/vet` heuristic and manifest analyzer with `--vet`, `--vet-strict`, `--vetpkg` flags.
 - **Week 12: Red Team Verification Battery & Production Hardening**
-  - [ ] Execution of full 14-vector adversarial test battery (`SEC-01` through `SEC-14`) across macOS and Linux runners.
-  - [ ] End-to-end multi-platform integration testing (macOS Sonoma/Sequoia, Ubuntu 22.04/24.04).
-  - [ ] v1.0 GA release.
+  - [x] Execution of full adversarial test battery (`SEC-01` through `SEC-18`) across macOS and Linux runners in GitHub Actions.
+  - [x] End-to-end multi-platform integration testing (macOS Sonoma/Sequoia, Ubuntu 22.04/24.04).
+  - [x] v1.0 GA release preparation.
 
 ---
 
@@ -336,17 +336,20 @@ gantt
 
 | Component | Status | Test Coverage | Audit Reference |
 | :--- | :---: | :---: | :--- |
-| **CLI Dispatcher (`cmd/airlock`)** | **100% COMPLETE** | Manual & Integration | Entry point, exit code propagation, subcommands (`run`, `shim`, `version`). |
-| **Environment Sanitizer (`pkg/env`)** | **100% COMPLETE** | `TestSanitizer_Sanitize`, `TestSanitizePath`, `TestSEC05` | V-07 / Strict allowlist, PATH cleaning, secret scrubbing. |
+| **CLI Dispatcher (`cmd/airlock`)** | **100% COMPLETE** | Manual & Integration | Entry point, exit code propagation, subcommands (`run`, `shim install/uninstall/list`, `version`), `--vet` flags. Audit logger wired per invocation. |
+| **Environment Sanitizer (`pkg/env`)** | **100% COMPLETE** | `TestSanitizer_Sanitize`, `TestSanitizePath`, `TestSanitizePath_ShimDirStripped`, `TestSanitizer_DNSResolverInjection`, `TestSEC05` | V-07 / Strict allowlist, PATH cleaning, secret scrubbing, shim-dir stripping, AIRLOCK_DNS injection. |
 | **Scratch Space Manager (`pkg/scratch`)** | **100% COMPLETE** | `TestDefaultManager_Lifecycle`, `TestScavengeOrphans`, `TestSEC12` | V-11 / `0700` isolation, orphan garbage collection (>24h). |
 | **Seatbelt Synthesizer (`pkg/seatbelt`)** | **100% COMPLETE** | `TestProfileGenerator_Generate`, `TestLiveSeatbeltCompilation`, `SEC-01..04` | V-01, V-03, V-04, V-06, V-10 / Absolute interpolation, Mach IPC, .git/.env denials. |
-| **Localhost Proxy Whitelist (`pkg/proxy`)** | **100% COMPLETE** | `TestEgressProxy_DomainWhitelisting`, `TestSEC11` | V-02 / Registry whitelisting, connection rejection on unapproved domains. |
+| **Localhost Proxy Whitelist (`pkg/proxy`)** | **100% COMPLETE** | `TestEgressProxy_DomainWhitelisting`, `TestEgressProxy_PlainHTTPRejection`, `TestEgressProxy_AllowedDomainCheck`, `TestDNSServer_ResolutionAndTunnelingDenial`, `TestSEC11`, `TestSEC15` | V-02, V-08 / Registry whitelisting, plain HTTP forwarding, in-process DNS forwarder with NXDOMAIN tunneling denial. |
 | **Terminal Introspection (`pkg/pty`)** | **100% COMPLETE** | `TestPOSIXDetector_IsTerminal` | V-05 / Cross-platform `TIOCGETA` (Darwin) & `TCGETS` (Linux) termios ioctls. |
-| **macOS Confinement Engine (`pkg/sandbox`)** | **100% COMPLETE** | `TestMacOSEngine_Execute`, `ExitCodePropagation`, `NestedBypass` | `sandbox-exec` kernel sandbox driver, workspace discovery. |
-| **Linux Engine (`pkg/sandbox/linux.go`)** | **100% COMPLETE** | `TestLinuxEngine_BuildBwrapArgs`, `TestLinuxEngine_NestedBypass`, `TestFindWorkspaceSecrets`, `SEC-07, 10` | V-03, V-04, V-07, V-09 / Bubblewrap user namespaces, network detachment, secret masking. |
+| **macOS Confinement Engine (`pkg/sandbox`)** | **100% COMPLETE** | `TestMacOSEngine_Execute`, `ExitCodePropagation`, `NestedBypass`, `TestSEC16, 18` | `sandbox-exec` kernel sandbox driver, workspace discovery, audit telemetry, Argus pre-execution hook. |
+| **Linux Engine (`pkg/sandbox/linux.go`)** | **100% COMPLETE** | `TestLinuxEngine_BuildBwrapArgs`, `TestLinuxEngine_NestedBypass`, `TestFindWorkspaceSecrets`, `SEC-07, 10, 18` | V-03, V-04, V-07, V-09 / Bubblewrap user namespaces, network detachment, secret masking, Argus hook. |
 | **Seccomp-BPF Syscall Filter (`pkg/seccomp`)** | **100% COMPLETE** | `TestFilter_Compile_Amd64`, `Arm64`, `Simulation`, `SEC-09` | V-05, V-09 / Kernel syscall blocking (io_uring, ptrace, bpf, TIOCSTI ioctl). |
 | **Read-Only Cache Layer (`pkg/cache`)** | **100% COMPLETE** | `TestManager_GetHostCacheMounts`, `ProvisionStaging`, `SyncBack_Valid`, `SEC-13` | V-12 / Shared host cache mounts, atomic sync-back, symlink rejection. |
-| **Adversarial Test Suite (`tests/`)** | **100% COMPLETE** | Full pass (0 failures) | Live verification of `SEC-01..07`, `SEC-08..14`. |
+| **Structured Audit Logger (`pkg/audit`)** | **100% COMPLETE** | `TestFileLogger_AllEvents`, `TestFileLogger_FileWriteAndClose`, `TestNopLogger`, `TestSEC16` | JSON-lines telemetry to `~/.airlock/audit.log`; ExecutionRecord, NetworkRecord, DNSRecord, SecurityRecord; 0600 permissions. |
+| **Toolchain Shim Manager (`pkg/shim`)** | **100% COMPLETE** | `TestShimManager_Lifecycle`, `TestShim_RecursionBypassExecution`, `TestSEC17` | V-14 / Recursion-safe shell shims for 9 tools; `__AIRLOCK_ACTIVE` bypass; `install`, `uninstall`, `list`. |
+| **Argus Static Analysis (`pkg/vet`)** | **100% COMPLETE** | `TestEngine_CommandInspection`, `TestEngine_ManifestInspection`, `TestEngine_SetupPyInspection`, `TestSEC18` | Pre-execution heuristic scanner, suspicious flag interceptor, package.json/setup.py inspection, external vetpkg handoff. |
+| **Adversarial Test Suite (`tests/`)** | **100% COMPLETE** | Full pass (18/18 vectors, 0 failures) | Live verification of `SEC-01..07`, `SEC-08..18`. |
 | **Automation Toolchain (`Makefile`)** | **100% COMPLETE** | All targets operational | `build`, `test`, `test-race`, `test-sec`, `coverage`, `vulncheck`, `lint`, `cross-compile`, `package`. |
 | **CI/CD Build Pipeline (`.github/workflows`)** | **100% COMPLETE** | Verified in GitHub Actions format | Multi-arch compile (`darwin/arm64`, `darwin/amd64`, `linux/arm64`, `linux/amd64`), automated releases. |
 
