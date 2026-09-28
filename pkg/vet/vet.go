@@ -81,10 +81,10 @@ func (e *Engine) Inspect(ctx context.Context, cmdArgs []string, workspaceRoot st
 		return report, nil
 	}
 
-	// 1. Heuristic Command Line Checks
+	// 1. Heuristic Command Line Checks (Pipes, Flags, Typosquatting)
 	e.inspectCommandArgs(cmdArgs, report)
 
-	// 2. Workspace Manifest Analysis (package.json, setup.py, Cargo.toml)
+	// 2. Workspace Manifest Analysis (package.json, setup.py, pyproject.toml, build.rs, Cargo.toml)
 	if workspaceRoot != "" {
 		e.inspectWorkspaceManifests(workspaceRoot, report)
 	}
@@ -145,18 +145,45 @@ func (e *Engine) inspectCommandArgs(cmdArgs []string, report *Report) {
 			})
 		}
 	}
+
+	// Typosquatting inspection on CLI arguments
+	packages := ExtractPackageNames(cmdArgs)
+	for _, pkg := range packages {
+		isMalicious, desc, isSquat, popularTarget := CheckTyposquatting(pkg)
+		if isMalicious {
+			report.Findings = append(report.Findings, Finding{
+				RuleID:      "ARGUS-SQUAT-02",
+				Severity:    RiskCritical,
+				Description: fmt.Sprintf("Command targets known malicious/backdoored package %q: %s", pkg, desc),
+				Target:      pkg,
+				Remediation: "Abort installation immediately. Do not execute or download this package.",
+			})
+		} else if isSquat {
+			report.Findings = append(report.Findings, Finding{
+				RuleID:      "ARGUS-SQUAT-01",
+				Severity:    RiskHigh,
+				Description: fmt.Sprintf("Potential typosquat package %q closely resembles popular library %q", pkg, popularTarget),
+				Target:      pkg,
+				Remediation: fmt.Sprintf("Verify spelling. Did you intend to install %q instead?", popularTarget),
+			})
+		}
+	}
 }
 
 func (e *Engine) inspectWorkspaceManifests(workspaceRoot string, report *Report) {
-	// 1. Inspect package.json for dangerous lifecycle scripts
+	// 1. Inspect package.json for dangerous lifecycle scripts & typosquats
 	pkgJSONPath := filepath.Join(workspaceRoot, "package.json")
 	if data, err := os.ReadFile(pkgJSONPath); err == nil {
 		var manifest struct {
-			Scripts map[string]string `json:"scripts"`
+			Name            string            `json:"name"`
+			Scripts         map[string]string `json:"scripts"`
+			Dependencies    map[string]string `json:"dependencies"`
+			DevDependencies map[string]string `json:"devDependencies"`
 		}
 		if err := json.Unmarshal(data, &manifest); err == nil {
 			lifecycleHooks := []string{"preinstall", "install", "postinstall", "prepublish", "prepublishOnly"}
 			obfuscationPatterns := []string{"base64", "eval(", "curl", "wget", "socket", "/dev/tcp"}
+			dangerousShellCmds := []string{"curl ", "wget ", "nc -", "bash -i", "sh -i", "python -c", "powershell", "certutil"}
 
 			for _, hook := range lifecycleHooks {
 				script, exists := manifest.Scripts[hook]
@@ -164,8 +191,9 @@ func (e *Engine) inspectWorkspaceManifests(workspaceRoot string, report *Report)
 					continue
 				}
 
+				scriptLower := strings.ToLower(script)
 				for _, pattern := range obfuscationPatterns {
-					if strings.Contains(strings.ToLower(script), pattern) {
+					if strings.Contains(scriptLower, pattern) {
 						report.Findings = append(report.Findings, Finding{
 							RuleID:      "ARGUS-HOOK-01",
 							Severity:    RiskHigh,
@@ -176,21 +204,126 @@ func (e *Engine) inspectWorkspaceManifests(workspaceRoot string, report *Report)
 						break
 					}
 				}
+
+				for _, cmd := range dangerousShellCmds {
+					if strings.Contains(scriptLower, cmd) {
+						report.Findings = append(report.Findings, Finding{
+							RuleID:      "ARGUS-HOOK-02",
+							Severity:    RiskHigh,
+							Description: fmt.Sprintf("Lifecycle hook %q executes dangerous shell download/reverse-shell command: %q", hook, cmd),
+							Target:      fmt.Sprintf("%s: %s", hook, script),
+							Remediation: "Remove unauthorized network access or shell execution from lifecycle scripts.",
+						})
+						break
+					}
+				}
+			}
+
+			// Check manifest dependencies for typosquatting
+			allDeps := make(map[string]string)
+			for k, v := range manifest.Dependencies {
+				allDeps[k] = v
+			}
+			for k, v := range manifest.DevDependencies {
+				allDeps[k] = v
+			}
+
+			for dep := range allDeps {
+				isMalicious, desc, isSquat, popularTarget := CheckTyposquatting(dep)
+				if isMalicious {
+					report.Findings = append(report.Findings, Finding{
+						RuleID:      "ARGUS-SQUAT-02",
+						Severity:    RiskCritical,
+						Description: fmt.Sprintf("package.json references known malicious package %q: %s", dep, desc),
+						Target:      fmt.Sprintf("package.json -> %s", dep),
+						Remediation: "Remove dependency immediately.",
+					})
+				} else if isSquat {
+					report.Findings = append(report.Findings, Finding{
+						RuleID:      "ARGUS-SQUAT-01",
+						Severity:    RiskHigh,
+						Description: fmt.Sprintf("package.json dependency %q may be a typosquat targeting %q", dep, popularTarget),
+						Target:      fmt.Sprintf("package.json -> %s", dep),
+						Remediation: fmt.Sprintf("Confirm if dependency was intended to be %q.", popularTarget),
+					})
+				}
 			}
 		}
 	}
 
-	// 2. Inspect setup.py for raw reverse shells or unvetted network calls
+	// 2. Inspect setup.py for network calls and dynamic code execution
 	setupPyPath := filepath.Join(workspaceRoot, "setup.py")
 	if data, err := os.ReadFile(setupPyPath); err == nil {
 		content := string(data)
-		if strings.Contains(content, "urllib.request") || strings.Contains(content, "requests.get") || strings.Contains(content, "exec(b64decode") {
+		if strings.Contains(content, "urllib.request") || strings.Contains(content, "requests.get") || strings.Contains(content, "requests.post") || strings.Contains(content, "http.client") {
 			report.Findings = append(report.Findings, Finding{
 				RuleID:      "ARGUS-PY-01",
 				Severity:    RiskHigh,
-				Description: "setup.py contains pre-execution network fetching or base64 execution",
+				Description: "setup.py contains pre-execution network fetching routines",
 				Target:      setupPyPath,
 				Remediation: "Remove network calls from setup.py installer routines.",
+			})
+		}
+
+		if strings.Contains(content, "exec(b64decode") || strings.Contains(content, "eval(compile") || strings.Contains(content, "__import__('os').system") || strings.Contains(content, "/dev/tcp/") {
+			report.Findings = append(report.Findings, Finding{
+				RuleID:      "ARGUS-PY-02",
+				Severity:    RiskCritical,
+				Description: "setup.py contains obfuscated execution, base64 payload, or reverse shell syntax",
+				Target:      setupPyPath,
+				Remediation: "Inspect and remove obfuscated code evaluation from setup.py.",
+			})
+		}
+	}
+
+	// 3. Inspect pyproject.toml
+	pyprojectPath := filepath.Join(workspaceRoot, "pyproject.toml")
+	if data, err := os.ReadFile(pyprojectPath); err == nil {
+		content := string(data)
+		if strings.Contains(content, "curl ") || strings.Contains(content, "wget ") || strings.Contains(content, "http://") {
+			report.Findings = append(report.Findings, Finding{
+				RuleID:      "ARGUS-PY-03",
+				Severity:    RiskHigh,
+				Description: "pyproject.toml contains insecure HTTP endpoints or remote curl/wget build hooks",
+				Target:      pyprojectPath,
+				Remediation: "Ensure build backends and package indexes use verified HTTPS channels.",
+			})
+		}
+	}
+
+	// 4. Inspect Rust build.rs for network calls, process execution, and env harvesting
+	buildRsPath := filepath.Join(workspaceRoot, "build.rs")
+	if data, err := os.ReadFile(buildRsPath); err == nil {
+		content := string(data)
+		if strings.Contains(content, "reqwest") || strings.Contains(content, "ureq") || strings.Contains(content, "TcpStream::connect") {
+			report.Findings = append(report.Findings, Finding{
+				RuleID:      "ARGUS-RS-01",
+				Severity:    RiskHigh,
+				Description: "Rust build.rs contains outbound network socket connection logic",
+				Target:      buildRsPath,
+				Remediation: "Rust build scripts must not initiate network egress during compilation.",
+			})
+		}
+
+		if strings.Contains(content, "std::process::Command") || strings.Contains(content, "Command::new") {
+			if strings.Contains(content, `"sh"`) || strings.Contains(content, `"bash"`) || strings.Contains(content, `"curl"`) || strings.Contains(content, `"powershell"`) {
+				report.Findings = append(report.Findings, Finding{
+					RuleID:      "ARGUS-RS-02",
+					Severity:    RiskHigh,
+					Description: "Rust build.rs invokes external shell interpreter or network binary",
+					Target:      buildRsPath,
+					Remediation: "Avoid spawning shell processes in build.rs.",
+				})
+			}
+		}
+
+		if strings.Contains(content, "std::env::vars()") || strings.Contains(content, `env::var("AWS_`) || strings.Contains(content, `env::var("SSH_`) || strings.Contains(content, `env::var("GITHUB_TOKEN"`) {
+			report.Findings = append(report.Findings, Finding{
+				RuleID:      "ARGUS-RS-03",
+				Severity:    RiskHigh,
+				Description: "Rust build.rs harvests host environment variables or sensitive keys",
+				Target:      buildRsPath,
+				Remediation: "Restrict environment variable access to standard Cargo build keys (e.g. TARGET, OUT_DIR).",
 			})
 		}
 	}
