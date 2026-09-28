@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write # Required for Sigstore Cosign OIDC keyless signing
 
 jobs:
   release:
@@ -24,6 +25,9 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: true
+
+      - name: Install Sigstore Cosign
+        uses: sigstore/cosign-installer@v3.8.1
 
       - name: Install Linux Sandbox Dependencies
         run: |
@@ -42,12 +46,20 @@ jobs:
           fi
           make package VERSION="$VERSION"
 
+      - name: Sign Release Checksums with Cosign (Keyless OIDC)
+        run: |
+          echo "==> Signing checksums.txt with Sigstore Cosign (Keyless OIDC)..."
+          cosign sign-blob --yes \
+            --bundle dist/checksums.txt.bundle \
+            dist/checksums.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.tar.gz
             dist/checksums.txt
+            dist/checksums.txt.bundle
           generate_release_notes: true
           draft: false
           prerelease: false

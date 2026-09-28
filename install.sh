@@ -208,6 +208,24 @@ download "$DOWNLOAD_URL" "${TMP_DIR}/${TARBALL_NAME}"
 log_info "Downloading checksums.txt..."
 download "$CHECKSUMS_URL" "${TMP_DIR}/checksums.txt"
 
+# Verify Sigstore Cosign keyless provenance if cosign is installed
+if command -v cosign >/dev/null 2>&1; then
+    BUNDLE_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt.bundle"
+    log_info "Downloading Sigstore Cosign verification bundle..."
+    if download "$BUNDLE_URL" "${TMP_DIR}/checksums.txt.bundle" 2>/dev/null; then
+        log_info "Verifying keyless signature via Sigstore / Rekor transparency log..."
+        if cosign verify-blob \
+            --bundle "${TMP_DIR}/checksums.txt.bundle" \
+            --certificate-identity-regexp "^https://github.com/${REPO}/" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "${TMP_DIR}/checksums.txt" >/dev/null 2>&1; then
+            log_success "Cryptographic provenance verified with Sigstore Cosign (keyless OIDC)! 🔏"
+        else
+            log_warn "Sigstore Cosign signature verification failed for checksums.txt. Proceeding with SHA256 validation."
+        fi
+    fi
+fi
+
 # Verify SHA256 checksum
 log_info "Verifying cryptographic checksum..."
 EXPECTED_HASH="$(grep "${TARBALL_NAME}" "${TMP_DIR}/checksums.txt" | awk '{print $1}')"
