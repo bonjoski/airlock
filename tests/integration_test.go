@@ -1098,4 +1098,3 @@ func TestSEC27_MCPVetAndPolicyCheck(t *testing.T) {
 		t.Errorf("SEC-27 FAILED: Expected evil-exfil.com to be blocked")
 	}
 }
-

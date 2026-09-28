@@ -507,5 +507,3 @@ func handleMCP(args []string) {
 		os.Exit(1)
 	}
 }
-
-
