@@ -71,6 +71,7 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 		inspector = vet.NewEngine(vet.Config{
 			StrictMode:   m.opts.VetStrict,
 			ExternalTool: m.opts.VetTool,
+			IgnoredRules: m.opts.IgnoredVetRules,
 			Logger:       m.opts.AuditLogger,
 		})
 	}
@@ -101,7 +102,12 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 	// 4. Start Egress Proxy (unless in airgap mode or direct network mode)
 	var prx proxy.Proxy
 	if !m.opts.Airgap && !m.opts.AllowDirectNet {
-		p, err := proxy.NewWithLogger(m.opts.AllowedDomains, m.opts.AuditLogger)
+		p, err := proxy.NewWithOptions(proxy.Options{
+			AllowedDomains: m.opts.AllowedDomains,
+			Logger:         m.opts.AuditLogger,
+			PromptHandler:  m.opts.PromptHandler,
+			ConfigPath:     m.opts.ConfigPath,
+		})
 		if err != nil {
 			return 1, fmt.Errorf("sandbox: failed to start egress proxy: %w", err)
 		}
@@ -129,12 +135,16 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 	}
 
 	seatbeltParams := seatbelt.Params{
-		UserHome:       homeDir,
-		WorkspaceRoot:  m.opts.WorkspaceRoot,
-		ScratchDir:     sc.Root(),
-		Airgap:         m.opts.Airgap,
-		ProxyPort:      proxyPort,
-		AllowDirectNet: m.opts.AllowDirectNet,
+		UserHome:        homeDir,
+		WorkspaceRoot:   m.opts.WorkspaceRoot,
+		ScratchDir:      sc.Root(),
+		Airgap:          m.opts.Airgap,
+		ProxyPort:       proxyPort,
+		AllowDirectNet:  m.opts.AllowDirectNet,
+		ExtraAllowRead:  m.opts.ExtraAllowRead,
+		ExtraAllowWrite: m.opts.ExtraAllowWrite,
+		ExtraDenyRead:   m.opts.ExtraDenyRead,
+		ExtraDenyWrite:  m.opts.ExtraDenyWrite,
 	}
 
 	profileStr, err := m.generator.Generate(seatbeltParams)
@@ -150,6 +160,7 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 		ProxyURL:           proxyURL,
 		DNSResolverAddress: dnsAddr,
 		KeepEnv:            m.opts.KeepEnv,
+		DenyEnv:            m.opts.DenyEnv,
 	}
 
 	sanitizer := env.NewSanitizer(envConfig)

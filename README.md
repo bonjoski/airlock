@@ -37,6 +37,8 @@ go install github.com/bonjoski/airlock/cmd/airlock@latest
 * **Egress DNS & Proxy Shield:** In-process RFC 1035 UDP DNS forwarder and HTTPS forward proxy blocking DNS tunneling data exfiltration (`NXDOMAIN` on non-allowlisted domains).
 * **Transparent Toolchain Shims:** Automatic shimming for `npm`, `npx`, `pnpm`, `yarn`, `pip`, `pip3`, `cargo`, `uv`, and `bun` with recursion bypass.
 * **Argus Static Analysis Handoff:** Pre-execution heuristic scanner inspecting suspicious command patterns (`curl | sh`) and package lifecycle hooks.
+* **Declarative Project Policies (`airlock.yaml`):** Per-repository Policy-as-Code with strict guardrails and wildcard domain matching.
+* **Dynamic Interactive Capability Grants:** Real-time terminal prompts when unlisted domains are requested (`Allow once`, `Allow session`, `Save to airlock.yaml`).
 * **Structured Audit Logging:** Non-blocking JSON-lines security telemetry logged to `~/.airlock/audit.log`.
 
 ---
@@ -52,6 +54,50 @@ airlock run -- npm install
 airlock npm install
 airlock pip install -r requirements.txt
 airlock cargo build
+```
+
+### Declarative Project Policies (`airlock.yaml`)
+Scaffold, configure, and validate repository-level sandbox policies:
+```bash
+# Initialize a policy tailored to your project type (node, python, rust, go, general)
+airlock init --type node
+
+# Validate an existing policy against security invariant guardrails
+airlock config validate
+```
+
+Example `airlock.yaml`:
+```yaml
+version: "1"
+mode: strict
+
+network:
+  airgap: false
+  allow_domains:
+    - "api.github.com"
+    - "*.internal.corp"
+  unknown_domain_action: prompt
+
+env:
+  allow:
+    - "NODE_ENV"
+    - "NPM_CONFIG_REGISTRY"
+  deny:
+    - "DATABASE_URL"
+
+filesystem:
+  allow_read: []
+  allow_write: []
+  deny_read: []
+
+vetting:
+  enable: true
+  strict: false
+  ignored_rules: []
+
+interactive:
+  prompt_on_unknown_domain: true
+  prompt_timeout_sec: 15
 ```
 
 ### Offline Airgap Isolation
@@ -97,9 +143,10 @@ airlock --vet-strict npm install
 | **Host Secrets (`~/.ssh`, `~/.aws`, `~/.gnupg`)** | **BLOCKED** | Absolute path Seatbelt rules (macOS) & mount masking (Linux). |
 | **Workspace Secrets (`.env`, `*.pem`)** | **BLOCKED** | Per-workspace secret scanning & filesystem read denials. |
 | **Keychain & Security IPC** | **BLOCKED** | Denies Mach lookup to `securityd`, `launchservicesd`, `pasteboard`. |
-| **Outbound Network Sockets** | **Restricted** | Ephemeral egress proxy & in-process RFC 1035 DNS filter. |
+| **Outbound Network Sockets** | **Restricted** | Ephemeral egress proxy & in-process RFC 1035 DNS filter with wildcard matching. |
 | **System Calls (`io_uring`, `ptrace`, `TIOCSTI`)**| **BLOCKED** | Pure-Go compiled Seccomp-BPF filter. |
 | **Host Caches (`~/.npm`, `~/.cache/pip`, etc.)** | **Read-Only / Ephemeral**| Read-only mount + isolated staging scratch + atomic verified sync-back. |
+| **Policy Invariants** | **Guaranteed** | Declarative policies (`airlock.yaml`) cannot weaken root zero-trust boundaries. |
 
 ---
 
@@ -112,7 +159,7 @@ make test
 # Run Go race condition tests
 make test-race
 
-# Run 18/18 Adversarial Security Verification Suite
+# Run 25/25 Adversarial Security Verification Suite
 make test-sec
 
 # Run installer script test suite

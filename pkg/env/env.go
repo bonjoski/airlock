@@ -34,6 +34,7 @@ type Config struct {
 	ProxyURL           string   // Optional proxy URL, e.g. "http://127.0.0.1:18443"
 	DNSResolverAddress string   // Optional in-process DNS interceptor address, e.g. "127.0.0.1:5353"
 	KeepEnv            []string // Additional variables explicitly allowed by user
+	DenyEnv            []string // Variables explicitly denied / scrubbed
 }
 
 // Sanitizer provides an interface for environment transformation.
@@ -54,9 +55,17 @@ func NewSanitizer(cfg Config) *DefaultSanitizer {
 // Sanitize filters host environment variables, purges unsafe relative entries from PATH,
 // injects virtual paths, and exports the nesting sentinel __AIRLOCK_ACTIVE=1.
 func (s *DefaultSanitizer) Sanitize(hostEnv []string) []string {
+	denySet := make(map[string]bool, len(s.config.DenyEnv))
+	for _, d := range s.config.DenyEnv {
+		denySet[strings.TrimSpace(d)] = true
+	}
+
 	keepSet := make(map[string]bool, len(s.config.KeepEnv))
 	for _, k := range s.config.KeepEnv {
-		keepSet[strings.TrimSpace(k)] = true
+		trimmed := strings.TrimSpace(k)
+		if !denySet[trimmed] {
+			keepSet[trimmed] = true
+		}
 	}
 
 	result := make([]string, 0, len(hostEnv)+8)
@@ -68,6 +77,11 @@ func (s *DefaultSanitizer) Sanitize(hostEnv []string) []string {
 		}
 		key := entry[:idx]
 		val := entry[idx+1:]
+
+		// Explicit deny list takes absolute priority
+		if denySet[key] {
+			continue
+		}
 
 		// Explicit keep-env overrides take precedence
 		if keepSet[key] {

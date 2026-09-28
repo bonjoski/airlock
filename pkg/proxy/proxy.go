@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/bonjoski/airlock/pkg/audit"
+	"github.com/bonjoski/airlock/pkg/config"
+	"github.com/bonjoski/airlock/pkg/interactive"
 )
 
 // DefaultAllowedRegistries defines verified package manager registry endpoints.
@@ -29,6 +31,9 @@ var DefaultAllowedRegistries = []string{
 	"rubygems.org",
 }
 
+// PromptHandler callback for interactive runtime permission prompts.
+type PromptHandler func(domain string) interactive.Grant
+
 // Proxy defines the interface for an ephemeral egress forward proxy with DNS support.
 type Proxy interface {
 	Port() int
@@ -37,12 +42,24 @@ type Proxy interface {
 	Close() error
 }
 
+// Options specifies configuration options for the egress forward proxy.
+type Options struct {
+	AllowedDomains []string
+	Logger         audit.Logger
+	PromptHandler  PromptHandler
+	ConfigPath     string
+}
+
 // EgressProxy implements an ephemeral localhost forward proxy with domain whitelisting and DNS interception.
 type EgressProxy struct {
 	listener       net.Listener
 	port           int
 	dnsServer      *DNSServer
 	allowedDomains map[string]bool
+	domainRules    []string
+	domainMu       sync.RWMutex
+	promptHandler  PromptHandler
+	configPath     string
 	logger         audit.Logger
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -58,8 +75,16 @@ func New(extraAllowedDomains []string) (*EgressProxy, error) {
 
 // NewWithLogger creates an ephemeral forward proxy with structured audit telemetry.
 func NewWithLogger(extraAllowedDomains []string, logger audit.Logger) (*EgressProxy, error) {
-	if logger == nil {
-		logger = &audit.NopLogger{}
+	return NewWithOptions(Options{
+		AllowedDomains: extraAllowedDomains,
+		Logger:         logger,
+	})
+}
+
+// NewWithOptions creates an ephemeral forward proxy with full options (prompter, configPath, logger).
+func NewWithOptions(opts Options) (*EgressProxy, error) {
+	if opts.Logger == nil {
+		opts.Logger = &audit.NopLogger{}
 	}
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -73,17 +98,28 @@ func NewWithLogger(extraAllowedDomains []string, logger audit.Logger) (*EgressPr
 		return nil, fmt.Errorf("proxy: unexpected non-TCP listener address: %T", listener.Addr())
 	}
 
-	allowed := make(map[string]bool, len(DefaultAllowedRegistries)+len(extraAllowedDomains))
+	allowed := make(map[string]bool, len(DefaultAllowedRegistries)+len(opts.AllowedDomains))
+	var rules []string
+
 	for _, domain := range DefaultAllowedRegistries {
-		allowed[strings.ToLower(domain)] = true
+		lower := strings.ToLower(domain)
+		allowed[lower] = true
+		rules = append(rules, lower)
 	}
-	for _, domain := range extraAllowedDomains {
+	for _, domain := range opts.AllowedDomains {
 		if trimmed := strings.ToLower(strings.TrimSpace(domain)); trimmed != "" {
 			allowed[trimmed] = true
+			rules = append(rules, trimmed)
 		}
 	}
 
-	dnsServer, err := NewDNSServer(allowed, logger)
+	dnsServer, err := NewDNSServerWithOptions(DNSOptions{
+		AllowedDomains: allowed,
+		DomainRules:    rules,
+		Logger:         opts.Logger,
+		PromptHandler:  opts.PromptHandler,
+		ConfigPath:     opts.ConfigPath,
+	})
 	if err != nil {
 		_ = listener.Close()
 		return nil, fmt.Errorf("proxy: failed to start dns forwarder: %w", err)
@@ -96,7 +132,10 @@ func NewWithLogger(extraAllowedDomains []string, logger audit.Logger) (*EgressPr
 		port:           tcpAddr.Port,
 		dnsServer:      dnsServer,
 		allowedDomains: allowed,
-		logger:         logger,
+		domainRules:    rules,
+		promptHandler:  opts.PromptHandler,
+		configPath:     opts.ConfigPath,
+		logger:         opts.Logger,
 		ctx:            ctx,
 		cancel:         cancel,
 	}
@@ -217,7 +256,7 @@ func (p *EgressProxy) handleConnect(client net.Conn, reader *bufio.Reader, targe
 		}
 	}
 
-	// Verify target host against allowed domain whitelist
+	// Verify target host against allowed domain whitelist & wildcard rules
 	if !p.isDomainAllowed(host) {
 		_ = p.logger.LogNetwork(audit.NetworkRecord{
 			Protocol:   "https_connect",
@@ -252,80 +291,37 @@ func (p *EgressProxy) handleConnect(client net.Conn, reader *bufio.Reader, targe
 	}
 	defer remote.Close()
 
-	// Clear deadlines for tunnel streaming
-	_ = client.SetDeadline(time.Time{})
-	_ = remote.SetDeadline(time.Time{})
-
-	// Reply 200 Connection Established
+	// 200 Connection Established
 	_, err = client.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 	if err != nil {
 		return
 	}
 
-	// Bidirectional byte pipe
-	var pipeWg sync.WaitGroup
-	pipeWg.Add(2)
+	// Reset deadlines for bi-directional TLS tunnel
+	_ = client.SetDeadline(time.Time{})
+	_ = remote.SetDeadline(time.Time{})
 
-	go func() {
-		defer pipeWg.Done()
-		_, _ = io.Copy(remote, reader)
-		if tc, ok := remote.(*net.TCPConn); ok {
-			_ = tc.CloseWrite()
-		}
-	}()
-
-	go func() {
-		defer pipeWg.Done()
-		_, _ = io.Copy(client, remote)
-		if tc, ok := client.(*net.TCPConn); ok {
-			_ = tc.CloseWrite()
-		}
-	}()
-
-	pipeWg.Wait()
+	p.pipe(client, remote, reader)
 }
 
-func (p *EgressProxy) handlePlainHTTP(client net.Conn, reader *bufio.Reader, initialLine string, parts []string, clientAddr string) {
-	reqTarget := parts[1]
-	host := ""
+func (p *EgressProxy) handlePlainHTTP(client net.Conn, reader *bufio.Reader, firstLine string, parts []string, clientAddr string) {
+	reqURL, err := url.Parse(parts[1])
+	if err != nil || reqURL.Host == "" {
+		_, _ = client.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
+		return
+	}
+
+	host := reqURL.Hostname()
 	port := 80
-
-	if u, err := url.Parse(reqTarget); err == nil && u.Host != "" {
-		host = u.Hostname()
-		if pStr := u.Port(); pStr != "" {
-			if pVal, err := strconv.Atoi(pStr); err == nil {
-				port = pVal
-			}
+	if reqURL.Port() != "" {
+		if pVal, err := strconv.Atoi(reqURL.Port()); err == nil {
+			port = pVal
 		}
 	}
 
-	// Read remaining headers, extracting Host if not already discovered
-	var headers []string
-	for {
-		headerLine, err := reader.ReadString('\n')
-		if err != nil {
-			break
-		}
-		if headerLine == "\r\n" || headerLine == "\n" {
-			break
-		}
-		headers = append(headers, headerLine)
-		if host == "" && strings.HasPrefix(strings.ToLower(headerLine), "host:") {
-			val := strings.TrimSpace(headerLine[5:])
-			if colonIdx := strings.Index(val, ":"); colonIdx != -1 {
-				host = val[:colonIdx]
-				if pVal, err := strconv.Atoi(val[colonIdx+1:]); err == nil {
-					port = pVal
-				}
-			} else {
-				host = val
-			}
-		}
-	}
-
-	if host == "" || !p.isDomainAllowed(host) {
+	if !p.isDomainAllowed(host) {
 		_ = p.logger.LogNetwork(audit.NetworkRecord{
-			Protocol:   "http",
+			Protocol:   "http_plain",
 			Host:       host,
 			Port:       port,
 			Action:     "DENY",
@@ -337,7 +333,7 @@ func (p *EgressProxy) handlePlainHTTP(client net.Conn, reader *bufio.Reader, ini
 	}
 
 	_ = p.logger.LogNetwork(audit.NetworkRecord{
-		Protocol:   "http",
+		Protocol:   "http_plain",
 		Host:       host,
 		Port:       port,
 		Action:     "ALLOW",
@@ -345,24 +341,50 @@ func (p *EgressProxy) handlePlainHTTP(client net.Conn, reader *bufio.Reader, ini
 		ClientAddr: clientAddr,
 	})
 
-	remoteAddr := net.JoinHostPort(host, strconv.Itoa(port))
-	remote, err := net.DialTimeout("tcp", remoteAddr, 10*time.Second)
+	targetAddr := reqURL.Host
+	if !strings.Contains(targetAddr, ":") {
+		targetAddr = targetAddr + ":80"
+	}
+
+	remote, err := net.DialTimeout("tcp", targetAddr, 10*time.Second)
 	if err != nil {
 		_, _ = client.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		return
 	}
 	defer remote.Close()
 
-	// Forward initial request line & headers
-	_, _ = remote.Write([]byte(initialLine))
-	for _, h := range headers {
-		_, _ = remote.Write([]byte(h))
+	// Forward the first line
+	pathAndQuery := reqURL.RequestURI()
+	if pathAndQuery == "" {
+		pathAndQuery = "/"
 	}
-	_, _ = remote.Write([]byte("\r\n"))
+	modifiedFirstLine := fmt.Sprintf("%s %s %s\r\n", parts[0], pathAndQuery, parts[2])
+	if _, err := remote.Write([]byte(modifiedFirstLine)); err != nil {
+		return
+	}
 
+	// Forward the remaining headers
+	for {
+		headerLine, err := reader.ReadString('\n')
+		if err != nil {
+			break
+		}
+		if _, err := remote.Write([]byte(headerLine)); err != nil {
+			return
+		}
+		if headerLine == "\r\n" || headerLine == "\n" {
+			break
+		}
+	}
+
+	// Reset deadlines for tunneling data
 	_ = client.SetDeadline(time.Time{})
 	_ = remote.SetDeadline(time.Time{})
 
+	p.pipe(client, remote, reader)
+}
+
+func (p *EgressProxy) pipe(client, remote net.Conn, reader *bufio.Reader) {
 	var pipeWg sync.WaitGroup
 	pipeWg.Add(2)
 
@@ -387,13 +409,47 @@ func (p *EgressProxy) handlePlainHTTP(client net.Conn, reader *bufio.Reader, ini
 
 func (p *EgressProxy) isDomainAllowed(host string) bool {
 	hostLower := strings.ToLower(strings.TrimSuffix(host, "."))
+
+	p.domainMu.RLock()
 	if p.allowedDomains[hostLower] {
+		p.domainMu.RUnlock()
 		return true
 	}
 
-	// Subdomain matching (e.g. *.npmjs.org)
-	for allowed := range p.allowedDomains {
-		if strings.HasSuffix(hostLower, "."+allowed) {
+	for _, rule := range p.domainRules {
+		if config.MatchDomain(rule, hostLower) {
+			p.domainMu.RUnlock()
+			return true
+		}
+	}
+	p.domainMu.RUnlock()
+
+	// Dynamic capability grant prompt
+	if p.promptHandler != nil {
+		grant := p.promptHandler(hostLower)
+		switch grant {
+		case interactive.GrantOnce:
+			return true
+		case interactive.GrantSession:
+			p.domainMu.Lock()
+			p.allowedDomains[hostLower] = true
+			p.domainRules = append(p.domainRules, hostLower)
+			if p.dnsServer != nil {
+				p.dnsServer.AddAllowedDomain(hostLower)
+			}
+			p.domainMu.Unlock()
+			return true
+		case interactive.GrantPersist:
+			p.domainMu.Lock()
+			p.allowedDomains[hostLower] = true
+			p.domainRules = append(p.domainRules, hostLower)
+			if p.dnsServer != nil {
+				p.dnsServer.AddAllowedDomain(hostLower)
+			}
+			p.domainMu.Unlock()
+			if p.configPath != "" {
+				_ = config.AppendAllowedDomain(p.configPath, hostLower)
+			}
 			return true
 		}
 	}

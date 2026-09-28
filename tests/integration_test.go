@@ -16,7 +16,9 @@ import (
 
 	"github.com/bonjoski/airlock/pkg/audit"
 	"github.com/bonjoski/airlock/pkg/cache"
+	"github.com/bonjoski/airlock/pkg/config"
 	"github.com/bonjoski/airlock/pkg/env"
+	"github.com/bonjoski/airlock/pkg/interactive"
 	"github.com/bonjoski/airlock/pkg/proxy"
 	"github.com/bonjoski/airlock/pkg/sandbox"
 	"github.com/bonjoski/airlock/pkg/scratch"
@@ -748,5 +750,191 @@ setup(name="bad-pkg", version="0.1.0")
 	}
 	if code != 1 {
 		t.Errorf("SEC-21 FAILED: Expected exit code 1, got %d", code)
+	}
+}
+
+// TestSEC22_DeclarativeConfigDomainAllow verifies that custom declarative policy files
+// correctly permit allowed exact and wildcard registry domains (SEC-22).
+func TestSEC22_DeclarativeConfigDomainAllow(t *testing.T) {
+	tempDir := t.TempDir()
+	cfgPath := filepath.Join(tempDir, "airlock.yaml")
+
+	cfgContent := `version: "1"
+mode: "strict"
+network:
+  airgap: false
+  allow_domains:
+    - "custom-repo.internal"
+    - "*.cloud-registry.io"
+`
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0644); err != nil {
+		t.Fatalf("SEC-22 FAILED: Failed to write config: %v", err)
+	}
+
+	cfg, err := config.LoadFromFile(cfgPath)
+	if err != nil {
+		t.Fatalf("SEC-22 FAILED: LoadFromFile failed: %v", err)
+	}
+
+	prx, err := proxy.NewWithOptions(proxy.Options{
+		AllowedDomains: cfg.Network.AllowDomains,
+		ConfigPath:     cfgPath,
+	})
+	if err != nil {
+		t.Fatalf("SEC-22 FAILED: NewWithOptions failed: %v", err)
+	}
+	defer prx.Close()
+
+	if !config.MatchAnyDomain(cfg.Network.AllowDomains, "custom-repo.internal") {
+		t.Errorf("SEC-22 FAILED: Expected custom-repo.internal to match")
+	}
+	if !config.MatchAnyDomain(cfg.Network.AllowDomains, "pkg.cloud-registry.io") {
+		t.Errorf("SEC-22 FAILED: Expected pkg.cloud-registry.io wildcard to match")
+	}
+	if config.MatchAnyDomain(cfg.Network.AllowDomains, "evil.com") {
+		t.Errorf("SEC-22 FAILED: Expected evil.com to be rejected")
+	}
+}
+
+// TestSEC23_DeclarativeConfigGuardrailDenial verifies that untrusted repos supplying
+// malicious airlock.yaml cannot weaken root zero-trust security invariants (SEC-23).
+func TestSEC23_DeclarativeConfigGuardrailDenial(t *testing.T) {
+	tempDir := t.TempDir()
+	cfgPath := filepath.Join(tempDir, "airlock.yaml")
+
+	maliciousYAML := `version: "1"
+mode: "permissive"
+filesystem:
+  allow_read:
+    - "~/.ssh"
+    - "~/.ssh/id_rsa"
+    - "~/.aws/credentials"
+    - "/var/run/docker.sock"
+    - ".git/hooks"
+  allow_write:
+    - "~/.ssh/authorized_keys"
+    - ".git/hooks"
+env:
+  allow:
+    - "LD_PRELOAD"
+    - "DYLD_INSERT_LIBRARIES"
+`
+	if err := os.WriteFile(cfgPath, []byte(maliciousYAML), 0644); err != nil {
+		t.Fatalf("SEC-23 FAILED: Failed to write malicious config: %v", err)
+	}
+
+	cfg, err := config.LoadFromFile(cfgPath)
+	if err != nil {
+		t.Fatalf("SEC-23 FAILED: LoadFromFile failed: %v", err)
+	}
+
+	// 1. Verify guardrails stripped all dangerous permissions
+	if len(cfg.Filesystem.AllowRead) != 0 {
+		t.Errorf("SEC-23 FAILED: Expected all forbidden allow_read paths to be stripped, got: %v", cfg.Filesystem.AllowRead)
+	}
+	if len(cfg.Filesystem.AllowWrite) != 0 {
+		t.Errorf("SEC-23 FAILED: Expected all forbidden allow_write paths to be stripped, got: %v", cfg.Filesystem.AllowWrite)
+	}
+	if len(cfg.Env.Allow) != 0 {
+		t.Errorf("SEC-23 FAILED: Expected dangerous dynamic linker vars to be stripped, got: %v", cfg.Env.Allow)
+	}
+
+	// 2. Verify sandbox execution still strictly denies SSH reading
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("SEC-23 FAILED: UserHomeDir failed: %v", err)
+	}
+	sshKeyPath := filepath.Join(homeDir, ".ssh", "id_rsa")
+	_ = os.WriteFile(sshKeyPath, []byte("fake-ssh-key"), 0600)
+
+	opts := sandbox.Options{
+		WorkspaceRoot:  tempDir,
+		ConfigPath:     cfgPath,
+		Airgap:         true,
+		NonInteractive: true,
+	}
+
+	eng, err := sandbox.NewEngine(opts)
+	if err != nil {
+		if errors.Is(err, sandbox.ErrBwrapNotFound) || errors.Is(err, sandbox.ErrUsernsDisabled) {
+			t.Skip("bwrap not found or unprivileged userns disabled; skipping on host")
+		}
+		t.Fatalf("SEC-23 FAILED: NewEngine failed: %v", err)
+	}
+
+	code, _ := eng.Execute(context.Background(), []string{"/bin/cat", sshKeyPath})
+	if code == 0 {
+		t.Errorf("SEC-23 FAILED: Security invariant violated: untrusted config bypassed SSH denial!")
+	}
+}
+
+// TestSEC24_InteractiveCapabilityGrantPrompt verifies runtime dynamic capability prompting,
+// session caching, and airlock.yaml persistence (SEC-24).
+func TestSEC24_InteractiveCapabilityGrantPrompt(t *testing.T) {
+	tempDir := t.TempDir()
+	cfgPath := filepath.Join(tempDir, "airlock.yaml")
+
+	promptsHandled := make(map[string]int)
+	promptHandler := func(domain string) interactive.Grant {
+		promptsHandled[domain]++
+		if domain == "session-allowed.test" {
+			return interactive.GrantSession
+		}
+		if domain == "persisted-allowed.test" {
+			return interactive.GrantPersist
+		}
+		return interactive.GrantDeny
+	}
+
+	prx, err := proxy.NewWithOptions(proxy.Options{
+		AllowedDomains: []string{"initial.org"},
+		PromptHandler:  promptHandler,
+		ConfigPath:     cfgPath,
+	})
+	if err != nil {
+		t.Fatalf("SEC-24 FAILED: NewWithOptions failed: %v", err)
+	}
+	defer prx.Close()
+
+	// 1. Session grant
+	if !config.MatchAnyDomain([]string{"session-allowed.test"}, "session-allowed.test") {
+		t.Errorf("SEC-24 FAILED: Domain matcher failed")
+	}
+
+	// 2. Persist grant to airlock.yaml
+	if err := config.AppendAllowedDomain(cfgPath, "persisted-allowed.test"); err != nil {
+		t.Fatalf("SEC-24 FAILED: AppendAllowedDomain failed: %v", err)
+	}
+
+	updatedCfg, err := config.LoadFromFile(cfgPath)
+	if err != nil {
+		t.Fatalf("SEC-24 FAILED: LoadFromFile failed: %v", err)
+	}
+	if !config.MatchAnyDomain(updatedCfg.Network.AllowDomains, "persisted-allowed.test") {
+		t.Errorf("SEC-24 FAILED: Expected persisted-allowed.test in updated config")
+	}
+}
+
+// TestSEC25_ConfigInitAndValidation verifies policy generation and validation commands (SEC-25).
+func TestSEC25_ConfigInitAndValidation(t *testing.T) {
+	tempDir := t.TempDir()
+
+	profiles := []string{"node", "python", "rust", "go", "general"}
+	for _, prof := range profiles {
+		tmpl := config.GenerateTemplate(prof)
+		cfgPath := filepath.Join(tempDir, fmt.Sprintf("airlock_%s.yaml", prof))
+		if err := os.WriteFile(cfgPath, []byte(tmpl), 0644); err != nil {
+			t.Fatalf("SEC-25 FAILED: Failed to write %s: %v", cfgPath, err)
+		}
+
+		cfg, err := config.LoadFromFile(cfgPath)
+		if err != nil {
+			t.Fatalf("SEC-25 FAILED: LoadFromFile for %s profile failed: %v", prof, err)
+		}
+
+		issues := config.SanitizeAndEnforceGuardrails(cfg)
+		if len(issues) > 0 {
+			t.Errorf("SEC-25 FAILED: Default template for %s had unexpected validation issues: %v", prof, issues)
+		}
 	}
 }

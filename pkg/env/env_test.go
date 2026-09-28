@@ -142,3 +142,35 @@ func TestSanitizer_DNSResolverInjection(t *testing.T) {
 		t.Errorf("Expected AIRLOCK_DNS to be set, got %q", envMap["AIRLOCK_DNS"])
 	}
 }
+
+func TestSanitizer_DenyEnv(t *testing.T) {
+	cfg := Config{
+		KeepEnv: []string{"CUSTOM_VAR", "CI"},
+		DenyEnv: []string{"CI", "DENIED_VAR"},
+	}
+	sanitizer := NewSanitizer(cfg)
+	sanitized := sanitizer.Sanitize([]string{
+		"TERM=xterm",
+		"CI=true",
+		"CUSTOM_VAR=val",
+		"DENIED_VAR=secret",
+	})
+
+	envMap := make(map[string]string)
+	for _, entry := range sanitized {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	if _, exists := envMap["CI"]; exists {
+		t.Errorf("Expected CI to be dropped by DenyEnv")
+	}
+	if _, exists := envMap["DENIED_VAR"]; exists {
+		t.Errorf("Expected DENIED_VAR to be dropped by DenyEnv")
+	}
+	if envMap["CUSTOM_VAR"] != "val" {
+		t.Errorf("Expected CUSTOM_VAR to be preserved")
+	}
+}

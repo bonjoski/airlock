@@ -53,6 +53,7 @@ type Inspector interface {
 type Config struct {
 	StrictMode   bool         // If true, High and Critical risks block execution automatically
 	ExternalTool string       // Optional path to external vetpkg/argus binary
+	IgnoredRules []string     // Rule IDs to ignore/suppress
 	Logger       audit.Logger // Audit telemetry logger
 }
 
@@ -351,6 +352,19 @@ func (e *Engine) runExternalTool(ctx context.Context, tool string, cmdArgs []str
 }
 
 func (e *Engine) evaluateRiskAndPolicy(report *Report) {
+	ignored := make(map[string]bool, len(e.config.IgnoredRules))
+	for _, ruleID := range e.config.IgnoredRules {
+		ignored[strings.ToUpper(strings.TrimSpace(ruleID))] = true
+	}
+
+	var filtered []Finding
+	for _, f := range report.Findings {
+		if !ignored[strings.ToUpper(f.RuleID)] {
+			filtered = append(filtered, f)
+		}
+	}
+	report.Findings = filtered
+
 	highest := RiskNone
 
 	for _, f := range report.Findings {

@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/bonjoski/airlock/pkg/audit"
+	"github.com/bonjoski/airlock/pkg/config"
+	"github.com/bonjoski/airlock/pkg/interactive"
 )
 
 // DNSHeader represents the 12-byte header of an RFC 1035 DNS message.
@@ -29,7 +31,11 @@ type DNSServer struct {
 	conn           *net.UDPConn
 	port           int
 	allowedDomains map[string]bool
+	domainRules    []string
+	domainMu       sync.RWMutex
 	logger         audit.Logger
+	promptHandler  PromptHandler
+	configPath     string
 	ctx            context.Context
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
@@ -39,8 +45,25 @@ type DNSServer struct {
 
 // NewDNSServer creates and starts an ephemeral DNS listener on 127.0.0.1:0.
 func NewDNSServer(allowedDomains map[string]bool, logger audit.Logger) (*DNSServer, error) {
-	if logger == nil {
-		logger = &audit.NopLogger{}
+	return NewDNSServerWithOptions(DNSOptions{
+		AllowedDomains: allowedDomains,
+		Logger:         logger,
+	})
+}
+
+// DNSOptions specifies configuration for the DNS interception server.
+type DNSOptions struct {
+	AllowedDomains map[string]bool
+	DomainRules    []string
+	Logger         audit.Logger
+	PromptHandler  PromptHandler
+	ConfigPath     string
+}
+
+// NewDNSServerWithOptions creates a DNS forwarder with advanced options.
+func NewDNSServerWithOptions(opts DNSOptions) (*DNSServer, error) {
+	if opts.Logger == nil {
+		opts.Logger = &audit.NopLogger{}
 	}
 
 	addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
@@ -61,11 +84,21 @@ func NewDNSServer(allowedDomains map[string]bool, logger audit.Logger) (*DNSServ
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	rules := opts.DomainRules
+	if len(rules) == 0 && opts.AllowedDomains != nil {
+		for d := range opts.AllowedDomains {
+			rules = append(rules, d)
+		}
+	}
+
 	s := &DNSServer{
 		conn:           conn,
 		port:           localAddr.Port,
-		allowedDomains: allowedDomains,
-		logger:         logger,
+		allowedDomains: opts.AllowedDomains,
+		domainRules:    rules,
+		logger:         opts.Logger,
+		promptHandler:  opts.PromptHandler,
+		configPath:     opts.ConfigPath,
 		ctx:            ctx,
 		cancel:         cancel,
 	}
@@ -79,6 +112,18 @@ func NewDNSServer(allowedDomains map[string]bool, logger audit.Logger) (*DNSServ
 // Port returns the ephemeral UDP port assigned to this DNS server.
 func (s *DNSServer) Port() int {
 	return s.port
+}
+
+// AddAllowedDomain dynamically authorizes a domain at runtime.
+func (s *DNSServer) AddAllowedDomain(domain string) {
+	s.domainMu.Lock()
+	defer s.domainMu.Unlock()
+	d := strings.ToLower(strings.TrimSpace(domain))
+	if s.allowedDomains == nil {
+		s.allowedDomains = make(map[string]bool)
+	}
+	s.allowedDomains[d] = true
+	s.domainRules = append(s.domainRules, d)
 }
 
 // Close gracefully terminates the DNS listener.
@@ -198,15 +243,39 @@ func (s *DNSServer) handleQuery(query []byte, remoteAddr net.Addr) {
 
 func (s *DNSServer) isDomainAllowed(host string) bool {
 	hostLower := strings.ToLower(strings.TrimSuffix(host, "."))
+
+	s.domainMu.RLock()
 	if s.allowedDomains[hostLower] {
+		s.domainMu.RUnlock()
 		return true
 	}
 
-	for allowed := range s.allowedDomains {
-		if strings.HasSuffix(hostLower, "."+allowed) {
+	for _, rule := range s.domainRules {
+		if config.MatchDomain(rule, hostLower) {
+			s.domainMu.RUnlock()
 			return true
 		}
 	}
+	s.domainMu.RUnlock()
+
+	// Dynamic capability grant prompt
+	if s.promptHandler != nil {
+		grant := s.promptHandler(hostLower)
+		switch grant {
+		case interactive.GrantOnce:
+			return true
+		case interactive.GrantSession:
+			s.AddAllowedDomain(hostLower)
+			return true
+		case interactive.GrantPersist:
+			s.AddAllowedDomain(hostLower)
+			if s.configPath != "" {
+				_ = config.AppendAllowedDomain(s.configPath, hostLower)
+			}
+			return true
+		}
+	}
+
 	return false
 }
 

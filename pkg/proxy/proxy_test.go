@@ -6,11 +6,14 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/bonjoski/airlock/pkg/audit"
+	"github.com/bonjoski/airlock/pkg/config"
+	"github.com/bonjoski/airlock/pkg/interactive"
 )
 
 func TestEgressProxy_DomainWhitelisting(t *testing.T) {
@@ -218,4 +221,69 @@ func queryRawDNS(serverAddr string, domain string) (*DNSHeader, error) {
 	}
 
 	return respHeader, nil
+}
+
+func TestEgressProxy_InteractivePromptGrant(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "airlock.yaml")
+
+	promptCalls := 0
+	promptHandler := func(domain string) interactive.Grant {
+		promptCalls++
+		if domain == "allowed-session.org" {
+			return interactive.GrantSession
+		}
+		if domain == "allowed-save.org" {
+			return interactive.GrantPersist
+		}
+		return interactive.GrantDeny
+	}
+
+	p, err := NewWithOptions(Options{
+		AllowedDomains: []string{"base.org"},
+		PromptHandler:  promptHandler,
+		ConfigPath:     cfgPath,
+	})
+	if err != nil {
+		t.Fatalf("failed to create proxy with options: %v", err)
+	}
+	defer p.Close()
+
+	// 1. Initially disallowed domain prompted and granted for session
+	if !p.isDomainAllowed("allowed-session.org") {
+		t.Errorf("expected allowed-session.org to be allowed after grant")
+	}
+	if promptCalls != 1 {
+		t.Errorf("expected 1 prompt call, got %d", promptCalls)
+	}
+
+	// 2. Subsequent check for allowed-session.org should not prompt again (cached in session)
+	if !p.isDomainAllowed("allowed-session.org") {
+		t.Errorf("expected allowed-session.org to be cached in session")
+	}
+	if promptCalls != 1 {
+		t.Errorf("expected still 1 prompt call (cached), got %d", promptCalls)
+	}
+
+	// 3. Domain with GrantPersist should write to airlock.yaml
+	if !p.isDomainAllowed("allowed-save.org") {
+		t.Errorf("expected allowed-save.org to be allowed")
+	}
+	if promptCalls != 2 {
+		t.Errorf("expected 2 prompt calls, got %d", promptCalls)
+	}
+
+	// Verify written to config file
+	cfg, err := config.LoadFromFile(cfgPath)
+	if err != nil {
+		t.Fatalf("failed to load updated config: %v", err)
+	}
+	if !config.MatchAnyDomain(cfg.Network.AllowDomains, "allowed-save.org") {
+		t.Errorf("expected allowed-save.org to be persisted in config")
+	}
+
+	// 4. Denied domain
+	if p.isDomainAllowed("denied.org") {
+		t.Errorf("expected denied.org to be rejected")
+	}
 }

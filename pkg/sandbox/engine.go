@@ -11,26 +11,35 @@ import (
 	"runtime"
 
 	"github.com/bonjoski/airlock/pkg/audit"
+	"github.com/bonjoski/airlock/pkg/proxy"
 	"github.com/bonjoski/airlock/pkg/vet"
 )
 
 // Options holds runtime parameters for sandboxed execution.
 type Options struct {
-	WorkspaceRoot  string
-	Airgap         bool
-	AllowDirectNet bool
-	AllowedDomains []string
-	KeepEnv        []string
-	NonInteractive bool
-	ScratchBase    string
-	AuditLogger    audit.Logger  // Optional structured telemetry logger
-	VetEnabled     bool          // Enable Argus static analysis inspection
-	VetStrict      bool          // Fail closed on high/critical security findings
-	VetTool        string        // Path to external vetpkg/argus tool
-	Inspector      vet.Inspector // Injected inspector interface
-	Stdout         io.Writer
-	Stderr         io.Writer
-	Stdin          io.Reader
+	WorkspaceRoot   string
+	ConfigPath      string
+	Airgap          bool
+	AllowDirectNet  bool
+	AllowedDomains  []string
+	KeepEnv         []string
+	DenyEnv         []string
+	ExtraAllowRead  []string
+	ExtraAllowWrite []string
+	ExtraDenyRead   []string
+	ExtraDenyWrite  []string
+	NonInteractive  bool
+	ScratchBase     string
+	AuditLogger     audit.Logger        // Optional structured telemetry logger
+	VetEnabled      bool                // Enable Argus static analysis inspection
+	VetStrict       bool                // Fail closed on high/critical security findings
+	VetTool         string              // Path to external vetpkg/argus tool
+	IgnoredVetRules []string            // Argus rule IDs to ignore
+	Inspector       vet.Inspector       // Injected inspector interface
+	PromptHandler   proxy.PromptHandler // Dynamic capability prompter
+	Stdout          io.Writer
+	Stderr          io.Writer
+	Stdin           io.Reader
 }
 
 // Engine defines the common execution interface for process confinement backends (OCP/LSP).

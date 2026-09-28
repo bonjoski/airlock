@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"text/template"
 )
 
@@ -20,6 +21,10 @@ type Params struct {
 	Airgap               bool
 	ProxyPort            int
 	AllowDirectNet       bool
+	ExtraAllowRead       []string
+	ExtraAllowWrite      []string
+	ExtraDenyRead        []string
+	ExtraDenyWrite       []string
 }
 
 // Generator defines the interface for generating platform confinement profiles.
@@ -70,6 +75,9 @@ const profileTemplate = `;; Airlock (boxpkg) Hardened Confinement Policy
 
 ;; 4. Filesystem Read Policy: Allow system reads, but strictly block host and workspace secrets
 (allow file-read*)
+{{range .ExtraAllowRead}}
+(allow file-read* (subpath "{{.}}"))
+{{end}}
 
 ;; Block host secrets (V-01: Explicit Evaluated Absolute Paths)
 (deny file-read* file-write*
@@ -99,6 +107,9 @@ const profileTemplate = `;; Airlock (boxpkg) Hardened Confinement Policy
   (regex #"^{{.WorkspaceRootEscaped}}/.*\.pem$")
   (regex #"^{{.WorkspaceRootEscaped}}/(id_rsa|id_ed25519).*$")
   (regex #"^{{.WorkspaceRootEscaped}}/secrets\.json$"))
+{{range .ExtraDenyRead}}
+(deny file-read* (subpath "{{.}}"))
+{{end}}
 
 ;; 5. Filesystem Write Policy: Strictly confined to Workspace and Scratch (V-03)
 (deny file-write*)
@@ -106,10 +117,16 @@ const profileTemplate = `;; Airlock (boxpkg) Hardened Confinement Policy
 (allow file-write*
   (subpath "{{.WorkspaceRoot}}")
   (subpath "{{.ScratchDir}}"))
+{{range .ExtraAllowWrite}}
+(allow file-write* (subpath "{{.}}"))
+{{end}}
 
 ;; Prevent Workspace poisoning: protect .git directory from modification (V-03)
 (deny file-write*
   (subpath "{{.WorkspaceRoot}}/.git"))
+{{range .ExtraDenyWrite}}
+(deny file-write* (subpath "{{.}}"))
+{{end}}
 
 ;; 6. Network Egress Policy (V-02 & V-08)
 {{if .Airgap}}
@@ -148,6 +165,23 @@ func (g *ProfileGenerator) Generate(p Params) (string, error) {
 	if resolved, err := filepath.EvalSymlinks(p.ScratchDir); err == nil {
 		p.ScratchDir = resolved
 	}
+
+	expandPath := func(paths []string) []string {
+		var out []string
+		for _, raw := range paths {
+			cleaned := strings.TrimSpace(raw)
+			if strings.HasPrefix(cleaned, "~/") {
+				cleaned = filepath.Join(p.UserHome, cleaned[2:])
+			}
+			out = append(out, cleaned)
+		}
+		return out
+	}
+
+	p.ExtraAllowRead = expandPath(p.ExtraAllowRead)
+	p.ExtraAllowWrite = expandPath(p.ExtraAllowWrite)
+	p.ExtraDenyRead = expandPath(p.ExtraDenyRead)
+	p.ExtraDenyWrite = expandPath(p.ExtraDenyWrite)
 
 	// Escape WorkspaceRoot for regex use
 	p.WorkspaceRootEscaped = regexp.QuoteMeta(p.WorkspaceRoot)

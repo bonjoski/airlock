@@ -189,6 +189,24 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 		}
 	}
 
+	// Extra allowed read paths
+	for _, p := range l.opts.ExtraAllowRead {
+		cleaned := strings.TrimSpace(p)
+		if strings.HasPrefix(cleaned, "~/") && userHome != "" {
+			cleaned = filepath.Join(userHome, cleaned[2:])
+		}
+		args = append(args, "--ro-bind-try", cleaned, cleaned)
+	}
+
+	// Extra allowed write paths
+	for _, p := range l.opts.ExtraAllowWrite {
+		cleaned := strings.TrimSpace(p)
+		if strings.HasPrefix(cleaned, "~/") && userHome != "" {
+			cleaned = filepath.Join(userHome, cleaned[2:])
+		}
+		args = append(args, "--bind-try", cleaned, cleaned)
+	}
+
 	// Seccomp-BPF Syscall Filter Attachment (Target 2 / V-05, V-09)
 	// When passed via cmd.ExtraFiles[0], the child FD is always 3.
 	if seccompFile != nil {
@@ -230,6 +248,7 @@ func (l *LinuxEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 		inspector = vet.NewEngine(vet.Config{
 			StrictMode:   l.opts.VetStrict,
 			ExternalTool: l.opts.VetTool,
+			IgnoredRules: l.opts.IgnoredVetRules,
 			Logger:       l.opts.AuditLogger,
 		})
 	}
@@ -260,7 +279,12 @@ func (l *LinuxEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 	// 4. Start Egress Proxy (unless in airgap mode or direct network mode)
 	var prx proxy.Proxy
 	if !l.opts.Airgap && !l.opts.AllowDirectNet {
-		p, err := proxy.NewWithLogger(l.opts.AllowedDomains, l.opts.AuditLogger)
+		p, err := proxy.NewWithOptions(proxy.Options{
+			AllowedDomains: l.opts.AllowedDomains,
+			Logger:         l.opts.AuditLogger,
+			PromptHandler:  l.opts.PromptHandler,
+			ConfigPath:     l.opts.ConfigPath,
+		})
 		if err != nil {
 			return 1, fmt.Errorf("sandbox: failed to start egress proxy: %w", err)
 		}
