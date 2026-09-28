@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "airlock": {
+      "command": "airlock",
+      "args": ["mcp"],
+      "description": "Zero-trust workstation sandbox for untrusted package installs & agentic loops"
+    }
+  }
+}

@@ -115,15 +115,27 @@ var ConfigFileNames = []string{
 	".airlockrc",
 }
 
+// Default returns the baseline hardened configuration (alias for DefaultConfig).
+func Default() *Config {
+	return DefaultConfig()
+}
+
 // DiscoverConfig searches for an airlock policy file starting at workspaceRoot.
 // It returns the path to the found file, the parsed and sanitized Config, or nil if none found.
 func DiscoverConfig(workspaceRoot string) (string, *Config, error) {
+	p, cfg, _, err := DiscoverConfigWithIssues(workspaceRoot)
+	return p, cfg, err
+}
+
+// DiscoverConfigWithIssues searches for an airlock policy file starting at workspaceRoot.
+// It returns the path to the found file, the parsed Config, any validation issues detected, or an error.
+func DiscoverConfigWithIssues(workspaceRoot string) (string, *Config, []ValidationIssue, error) {
 	if workspaceRoot != "" {
 		for _, name := range ConfigFileNames {
 			p := filepath.Join(workspaceRoot, name)
 			if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-				cfg, err := LoadFromFile(p)
-				return p, cfg, err
+				cfg, issues, err := LoadFromFileWithIssues(p)
+				return p, cfg, issues, err
 			}
 		}
 	}
@@ -133,12 +145,12 @@ func DiscoverConfig(workspaceRoot string) (string, *Config, error) {
 	if err == nil {
 		globalPath := filepath.Join(home, ".airlock", "config.yaml")
 		if fi, err := os.Stat(globalPath); err == nil && !fi.IsDir() {
-			cfg, err := LoadFromFile(globalPath)
-			return globalPath, cfg, err
+			cfg, issues, err := LoadFromFileWithIssues(globalPath)
+			return globalPath, cfg, issues, err
 		}
 	}
 
-	return "", nil, nil
+	return "", nil, nil, nil
 }
 
 // LoadFromFile reads, parses, and sanitizes a policy configuration file.

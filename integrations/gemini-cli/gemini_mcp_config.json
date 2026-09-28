@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "airlock": {
+      "command": "airlock",
+      "args": ["mcp"]
+    }
+  }
+}

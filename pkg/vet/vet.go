@@ -77,15 +77,17 @@ func (e *Engine) Inspect(ctx context.Context, cmdArgs []string, workspaceRoot st
 		MaxRisk: RiskNone,
 	}
 
-	if len(cmdArgs) == 0 {
+	if len(cmdArgs) == 0 && workspaceRoot == "" {
 		report.DurationMs = time.Since(start).Milliseconds()
 		return report, nil
 	}
 
 	// 1. Heuristic Command Line Checks (Pipes, Flags, Typosquatting)
-	e.inspectCommandArgs(cmdArgs, report)
+	if len(cmdArgs) > 0 {
+		e.inspectCommandArgs(cmdArgs, report)
+	}
 
-	// 2. Workspace Manifest Analysis (package.json, setup.py, pyproject.toml, build.rs, Cargo.toml)
+	// 2. Workspace Manifest Analysis (package.json, setup.py, pyproject.toml, build.rs, Cargo.toml, Go, Ruby, Shell)
 	if workspaceRoot != "" {
 		e.inspectWorkspaceManifests(workspaceRoot, report)
 	}
@@ -169,6 +171,9 @@ func (e *Engine) inspectCommandArgs(cmdArgs []string, report *Report) {
 			})
 		}
 	}
+
+	// Obfuscated pipeline and shell exploit checks
+	report.Findings = append(report.Findings, InspectShellCommand(cmdArgs)...)
 }
 
 func (e *Engine) inspectWorkspaceManifests(workspaceRoot string, report *Report) {
@@ -328,6 +333,15 @@ func (e *Engine) inspectWorkspaceManifests(workspaceRoot string, report *Report)
 			})
 		}
 	}
+
+	// 5. Inspect Go Ecosystem (go.mod replace directives & go:generate shell injections)
+	report.Findings = append(report.Findings, InspectGoWorkspace(workspaceRoot)...)
+
+	// 6. Inspect Ruby Ecosystem (Gemfile, *.gemspec, extconf.rb, Rakefile)
+	report.Findings = append(report.Findings, InspectRubyWorkspace(workspaceRoot)...)
+
+	// 7. Inspect Workspace Shell Scripts (*.sh, *.bash, *.zsh)
+	report.Findings = append(report.Findings, InspectShellWorkspace(workspaceRoot)...)
 }
 
 func (e *Engine) runExternalTool(ctx context.Context, tool string, cmdArgs []string, workspaceRoot string, report *Report) error {

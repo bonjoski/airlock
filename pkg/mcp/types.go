@@ -48,7 +48,10 @@ type ServerInfo struct {
 
 // ServerCapabilities describes capabilities supported by the server.
 type ServerCapabilities struct {
-	Tools *ToolsCapability `json:"tools,omitempty"`
+	Tools     *ToolsCapability     `json:"tools,omitempty"`
+	Resources *ResourcesCapability `json:"resources,omitempty"`
+	Prompts   *PromptsCapability   `json:"prompts,omitempty"`
+	Logging   *LoggingCapability   `json:"logging,omitempty"`
 }
 
 // ToolsCapability indicates support for tools.
@@ -56,11 +59,101 @@ type ToolsCapability struct {
 	ListChanged bool `json:"listChanged,omitempty"`
 }
 
+// ResourcesCapability indicates support for resources.
+type ResourcesCapability struct {
+	Subscribe   bool `json:"subscribe,omitempty"`
+	ListChanged bool `json:"listChanged,omitempty"`
+}
+
+// PromptsCapability indicates support for prompts.
+type PromptsCapability struct {
+	ListChanged bool `json:"listChanged,omitempty"`
+}
+
+// LoggingCapability indicates support for logging.
+type LoggingCapability struct{}
+
 // InitializeResult is the response payload for the "initialize" method.
 type InitializeResult struct {
 	ProtocolVersion string             `json:"protocolVersion"`
 	Capabilities    ServerCapabilities `json:"capabilities"`
 	ServerInfo      ServerInfo         `json:"serverInfo"`
+}
+
+// Resource represents an MCP Resource definition.
+type Resource struct {
+	URI         string `json:"uri"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	MIMEType    string `json:"mimeType,omitempty"`
+}
+
+// ListResourcesResult is the response payload for "resources/list".
+type ListResourcesResult struct {
+	Resources []Resource `json:"resources"`
+}
+
+// ReadResourceParams is the parameters payload for "resources/read".
+type ReadResourceParams struct {
+	URI string `json:"uri"`
+}
+
+// ResourceContents represents a single resource's content.
+type ResourceContents struct {
+	URI      string `json:"uri"`
+	MIMEType string `json:"mimeType,omitempty"`
+	Text     string `json:"text,omitempty"`
+	Blob     string `json:"blob,omitempty"`
+}
+
+// ReadResourceResult is the response payload for "resources/read".
+type ReadResourceResult struct {
+	Contents []ResourceContents `json:"contents"`
+}
+
+// PromptArgument represents an argument accepted by a prompt template.
+type PromptArgument struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+}
+
+// Prompt represents an MCP Prompt definition.
+type Prompt struct {
+	Name        string           `json:"name"`
+	Description string           `json:"description,omitempty"`
+	Arguments   []PromptArgument `json:"arguments,omitempty"`
+}
+
+// ListPromptsResult is the response payload for "prompts/list".
+type ListPromptsResult struct {
+	Prompts []Prompt `json:"prompts"`
+}
+
+// GetPromptParams is the parameters payload for "prompts/get".
+type GetPromptParams struct {
+	Name      string            `json:"name"`
+	Arguments map[string]string `json:"arguments,omitempty"`
+}
+
+// PromptMessageRole defines the role in a prompt message.
+type PromptMessageRole string
+
+const (
+	RoleUser      PromptMessageRole = "user"
+	RoleAssistant PromptMessageRole = "assistant"
+)
+
+// PromptMessage represents a message in a prompt response.
+type PromptMessage struct {
+	Role    PromptMessageRole `json:"role"`
+	Content ContentItem       `json:"content"`
+}
+
+// GetPromptResult is the response payload for "prompts/get".
+type GetPromptResult struct {
+	Description string          `json:"description,omitempty"`
+	Messages    []PromptMessage `json:"messages"`
 }
 
 // Tool represents an MCP Tool definition.

@@ -6,16 +6,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 )
 
 // Server implements an MCP (Model Context Protocol) JSON-RPC 2.0 stdio server.
 type Server struct {
-	in      io.Reader
-	out     io.Writer
-	handler ToolHandler
-	outMu   sync.Mutex
-	version string
+	in              io.Reader
+	out             io.Writer
+	toolHandler     ToolHandler
+	resourceHandler ResourceHandler
+	promptHandler   PromptHandler
+	outMu           sync.Mutex
+	version         string
 }
 
 // ServerOption configures the MCP server.
@@ -24,7 +27,21 @@ type ServerOption func(*Server)
 // WithToolHandler customizes the tool handler.
 func WithToolHandler(handler ToolHandler) ServerOption {
 	return func(s *Server) {
-		s.handler = handler
+		s.toolHandler = handler
+	}
+}
+
+// WithResourceHandler customizes the resource handler.
+func WithResourceHandler(handler ResourceHandler) ServerOption {
+	return func(s *Server) {
+		s.resourceHandler = handler
+	}
+}
+
+// WithPromptHandler customizes the prompt handler.
+func WithPromptHandler(handler PromptHandler) ServerOption {
+	return func(s *Server) {
+		s.promptHandler = handler
 	}
 }
 
@@ -38,10 +55,12 @@ func WithVersion(v string) ServerOption {
 // NewServer creates a new MCP server instance.
 func NewServer(in io.Reader, out io.Writer, opts ...ServerOption) *Server {
 	s := &Server{
-		in:      in,
-		out:     out,
-		handler: NewDefaultToolHandler(),
-		version: "1.1.0",
+		in:              in,
+		out:             out,
+		toolHandler:     NewDefaultToolHandler(),
+		resourceHandler: NewDefaultResourceHandler(),
+		promptHandler:   NewDefaultPromptHandler(),
+		version:         "1.1.0",
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -119,7 +138,10 @@ func (s *Server) processRequest(ctx context.Context, req *Request) (*Response, e
 			Result: InitializeResult{
 				ProtocolVersion: "2024-11-05",
 				Capabilities: ServerCapabilities{
-					Tools: &ToolsCapability{ListChanged: false},
+					Tools:     &ToolsCapability{ListChanged: false},
+					Resources: &ResourcesCapability{Subscribe: false, ListChanged: false},
+					Prompts:   &PromptsCapability{ListChanged: false},
+					Logging:   &LoggingCapability{},
 				},
 				ServerInfo: ServerInfo{
 					Name:    "airlock-mcp",
@@ -166,11 +188,11 @@ func (s *Server) processRequest(ctx context.Context, req *Request) (*Response, e
 
 		switch params.Name {
 		case "airlock_exec":
-			result, callErr = s.handler.HandleExec(ctx, params.Arguments)
+			result, callErr = s.toolHandler.HandleExec(ctx, params.Arguments)
 		case "airlock_vet":
-			result, callErr = s.handler.HandleVet(ctx, params.Arguments)
+			result, callErr = s.toolHandler.HandleVet(ctx, params.Arguments)
 		case "airlock_policy_check":
-			result, callErr = s.handler.HandlePolicyCheck(ctx, params.Arguments)
+			result, callErr = s.toolHandler.HandlePolicyCheck(ctx, params.Arguments)
 		default:
 			return &Response{
 				JSONRPC: "2.0",
@@ -197,6 +219,131 @@ func (s *Server) processRequest(ctx context.Context, req *Request) (*Response, e
 			JSONRPC: "2.0",
 			ID:      req.ID,
 			Result:  result,
+		}, nil
+
+	case "resources/list":
+		result, err := s.resourceHandler.ListResources(ctx)
+		if err != nil {
+			return &Response{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error: &RPCError{
+					Code:    CodeInternalError,
+					Message: fmt.Sprintf("failed to list resources: %v", err),
+				},
+			}, nil
+		}
+		return &Response{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result:  result,
+		}, nil
+
+	case "resources/read":
+		var params ReadResourceParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return &Response{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error: &RPCError{
+					Code:    CodeInvalidParams,
+					Message: fmt.Sprintf("invalid resources/read params: %v", err),
+				},
+			}, nil
+		}
+		if strings.TrimSpace(params.URI) == "" {
+			return &Response{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error: &RPCError{
+					Code:    CodeInvalidParams,
+					Message: "missing required 'uri' parameter",
+				},
+			}, nil
+		}
+
+		result, err := s.resourceHandler.ReadResource(ctx, params.URI)
+		if err != nil {
+			return &Response{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error: &RPCError{
+					Code:    CodeInvalidParams,
+					Message: err.Error(),
+				},
+			}, nil
+		}
+
+		return &Response{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result:  result,
+		}, nil
+
+	case "prompts/list":
+		result, err := s.promptHandler.ListPrompts(ctx)
+		if err != nil {
+			return &Response{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error: &RPCError{
+					Code:    CodeInternalError,
+					Message: fmt.Sprintf("failed to list prompts: %v", err),
+				},
+			}, nil
+		}
+		return &Response{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result:  result,
+		}, nil
+
+	case "prompts/get":
+		var params GetPromptParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return &Response{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error: &RPCError{
+					Code:    CodeInvalidParams,
+					Message: fmt.Sprintf("invalid prompts/get params: %v", err),
+				},
+			}, nil
+		}
+		if strings.TrimSpace(params.Name) == "" {
+			return &Response{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error: &RPCError{
+					Code:    CodeInvalidParams,
+					Message: "missing required 'name' parameter",
+				},
+			}, nil
+		}
+
+		result, err := s.promptHandler.GetPrompt(ctx, params.Name, params.Arguments)
+		if err != nil {
+			return &Response{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error: &RPCError{
+					Code:    CodeInvalidParams,
+					Message: err.Error(),
+				},
+			}, nil
+		}
+
+		return &Response{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result:  result,
+		}, nil
+
+	case "logging/setLevel":
+		return &Response{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result:  map[string]interface{}{},
 		}, nil
 
 	default:

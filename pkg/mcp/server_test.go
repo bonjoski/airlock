@@ -33,6 +33,20 @@ func TestMCPServer_Initialize(t *testing.T) {
 	if result.ServerInfo.Version != "1.1.0" {
 		t.Errorf("Expected version '1.1.0', got %s", result.ServerInfo.Version)
 	}
+
+	// Verify MCP Server Capabilities
+	if result.Capabilities.Tools == nil {
+		t.Errorf("Expected Tools capability to be declared")
+	}
+	if result.Capabilities.Resources == nil {
+		t.Errorf("Expected Resources capability to be declared")
+	}
+	if result.Capabilities.Prompts == nil {
+		t.Errorf("Expected Prompts capability to be declared")
+	}
+	if result.Capabilities.Logging == nil {
+		t.Errorf("Expected Logging capability to be declared")
+	}
 }
 
 func TestMCPServer_Ping(t *testing.T) {
@@ -254,9 +268,157 @@ network:
 	}
 }
 
+func TestMCPServer_Resources_ListAndRead(t *testing.T) {
+	s := NewServer(nil, nil)
+
+	// 1. Test resources/list
+	listReq := `{"jsonrpc":"2.0","id":8,"method":"resources/list"}`
+	resp, err := s.HandleMessage(context.Background(), []byte(listReq))
+	if err != nil {
+		t.Fatalf("HandleMessage error: %v", err)
+	}
+	if resp.Error != nil {
+		t.Fatalf("Unexpected RPC error: %+v", resp.Error)
+	}
+
+	listResult, ok := resp.Result.(*ListResourcesResult)
+	if !ok {
+		t.Fatalf("Expected *ListResourcesResult, got %T", resp.Result)
+	}
+	if len(listResult.Resources) != 3 {
+		t.Fatalf("Expected 3 resources, got %d", len(listResult.Resources))
+	}
+
+	// 2. Test resources/read airlock://health
+	readHealthReq := `{"jsonrpc":"2.0","id":9,"method":"resources/read","params":{"uri":"airlock://health"}}`
+	healthResp, err := s.HandleMessage(context.Background(), []byte(readHealthReq))
+	if err != nil {
+		t.Fatalf("HandleMessage error: %v", err)
+	}
+	if healthResp.Error != nil {
+		t.Fatalf("Unexpected RPC error: %+v", healthResp.Error)
+	}
+
+	healthRes, ok := healthResp.Result.(*ReadResourceResult)
+	if !ok || len(healthRes.Contents) == 0 {
+		t.Fatalf("Expected valid ReadResourceResult with contents")
+	}
+	if healthRes.Contents[0].URI != ResourceURIHealth {
+		t.Errorf("Expected URI %s, got %s", ResourceURIHealth, healthRes.Contents[0].URI)
+	}
+
+	// 3. Test resources/read airlock://policy/active
+	readPolicyReq := `{"jsonrpc":"2.0","id":10,"method":"resources/read","params":{"uri":"airlock://policy/active"}}`
+	polResp, err := s.HandleMessage(context.Background(), []byte(readPolicyReq))
+	if err != nil {
+		t.Fatalf("HandleMessage error: %v", err)
+	}
+	if polResp.Error != nil {
+		t.Fatalf("Unexpected RPC error: %+v", polResp.Error)
+	}
+
+	// 4. Test resources/read airlock://audit/recent
+	readAuditReq := `{"jsonrpc":"2.0","id":11,"method":"resources/read","params":{"uri":"airlock://audit/recent"}}`
+	auditResp, err := s.HandleMessage(context.Background(), []byte(readAuditReq))
+	if err != nil {
+		t.Fatalf("HandleMessage error: %v", err)
+	}
+	if auditResp.Error != nil {
+		t.Fatalf("Unexpected RPC error: %+v", auditResp.Error)
+	}
+
+	// 5. Test resources/read with missing URI
+	badReadReq := `{"jsonrpc":"2.0","id":12,"method":"resources/read","params":{}}`
+	badResp, err := s.HandleMessage(context.Background(), []byte(badReadReq))
+	if err != nil {
+		t.Fatalf("HandleMessage error: %v", err)
+	}
+	if badResp.Error == nil || badResp.Error.Code != CodeInvalidParams {
+		t.Errorf("Expected CodeInvalidParams error for missing URI, got: %+v", badResp.Error)
+	}
+}
+
+func TestMCPServer_Prompts_ListAndGet(t *testing.T) {
+	s := NewServer(nil, nil)
+
+	// 1. Test prompts/list
+	listReq := `{"jsonrpc":"2.0","id":13,"method":"prompts/list"}`
+	resp, err := s.HandleMessage(context.Background(), []byte(listReq))
+	if err != nil {
+		t.Fatalf("HandleMessage error: %v", err)
+	}
+	if resp.Error != nil {
+		t.Fatalf("Unexpected RPC error: %+v", resp.Error)
+	}
+
+	listResult, ok := resp.Result.(*ListPromptsResult)
+	if !ok {
+		t.Fatalf("Expected *ListPromptsResult, got %T", resp.Result)
+	}
+	if len(listResult.Prompts) != 3 {
+		t.Fatalf("Expected 3 prompts, got %d", len(listResult.Prompts))
+	}
+
+	// 2. Test prompts/get security_review
+	getReq := `{
+		"jsonrpc": "2.0",
+		"id": 14,
+		"method": "prompts/get",
+		"params": {
+			"name": "security_review",
+			"arguments": {
+				"target_path": "package.json",
+				"context": "CI check"
+			}
+		}
+	}`
+	getResp, err := s.HandleMessage(context.Background(), []byte(getReq))
+	if err != nil {
+		t.Fatalf("HandleMessage error: %v", err)
+	}
+	if getResp.Error != nil {
+		t.Fatalf("Unexpected RPC error: %+v", getResp.Error)
+	}
+	getRes, ok := getResp.Result.(*GetPromptResult)
+	if !ok || len(getRes.Messages) == 0 {
+		t.Fatalf("Expected valid GetPromptResult with messages")
+	}
+
+	// 3. Test prompts/get unknown prompt
+	unknownReq := `{
+		"jsonrpc": "2.0",
+		"id": 15,
+		"method": "prompts/get",
+		"params": {
+			"name": "non_existent_prompt"
+		}
+	}`
+	unknownResp, err := s.HandleMessage(context.Background(), []byte(unknownReq))
+	if err != nil {
+		t.Fatalf("HandleMessage error: %v", err)
+	}
+	if unknownResp.Error == nil {
+		t.Errorf("Expected error for unknown prompt, got nil")
+	}
+}
+
+func TestMCPServer_Logging_SetLevel(t *testing.T) {
+	s := NewServer(nil, nil)
+	reqJSON := `{"jsonrpc":"2.0","id":16,"method":"logging/setLevel","params":{"level":"info"}}`
+	resp, err := s.HandleMessage(context.Background(), []byte(reqJSON))
+	if err != nil {
+		t.Fatalf("HandleMessage error: %v", err)
+	}
+	if resp.Error != nil {
+		t.Fatalf("Unexpected error for logging/setLevel: %+v", resp.Error)
+	}
+}
+
 func TestMCPServer_StreamPipe(t *testing.T) {
 	inputData := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}` + "\n" +
-		`{"jsonrpc":"2.0","id":2,"method":"ping"}` + "\n"
+		`{"jsonrpc":"2.0","id":2,"method":"resources/list"}` + "\n" +
+		`{"jsonrpc":"2.0","id":3,"method":"prompts/list"}` + "\n" +
+		`{"jsonrpc":"2.0","id":4,"method":"ping"}` + "\n"
 
 	in := bytes.NewBufferString(inputData)
 	out := &bytes.Buffer{}
@@ -267,7 +429,7 @@ func TestMCPServer_StreamPipe(t *testing.T) {
 	}
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("Expected 2 response lines, got %d:\n%s", len(lines), out.String())
+	if len(lines) != 4 {
+		t.Fatalf("Expected 4 response lines, got %d:\n%s", len(lines), out.String())
 	}
 }

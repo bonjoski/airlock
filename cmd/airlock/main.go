@@ -53,6 +53,12 @@ func main() {
 	case "shim":
 		handleShim(os.Args[2:])
 		os.Exit(0)
+	case "doctor":
+		handleDoctor(os.Args[2:])
+		os.Exit(0)
+	case "audit":
+		handleAudit(os.Args[2:])
+		os.Exit(0)
 	case "mcp":
 		handleMCP(os.Args[2:])
 		os.Exit(0)
@@ -80,6 +86,8 @@ Usage:
   airlock config validate [--config <path>]
   airlock shim install [--target <dir>]
   airlock shim uninstall [--target <dir>]
+  airlock doctor [--json] [--workspace <path>]
+  airlock audit [list|tail|stats|export] [flags]
   airlock mcp
   airlock version
 
@@ -493,4 +501,5 @@ func handleMCP(args []string) {
 		os.Exit(1)
 	}
 }
+
 

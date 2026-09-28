@@ -68,6 +68,39 @@ func TestSEC01_SSHReadDenial(t *testing.T) {
 	}
 }
 
+// TestSEC02_RawSocketEgressDenial verifies that direct raw socket egress bypassing the proxy is denied by the kernel (V-02).
+func TestSEC02_RawSocketEgressDenial(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS only")
+	}
+
+	tempDir := t.TempDir()
+	workspace := filepath.Join(tempDir, "workspace")
+	scratchDir := filepath.Join(tempDir, "scratch")
+
+	_ = os.Mkdir(workspace, 0755)
+	_ = os.Mkdir(scratchDir, 0700)
+
+	// Airgap profile: blocks all network egress
+	p := seatbelt.Params{
+		WorkspaceRoot: workspace,
+		ScratchDir:    scratchDir,
+		Airgap:        true,
+	}
+
+	gen := seatbelt.NewGenerator()
+	profile, err := gen.Generate(p)
+	if err != nil {
+		t.Fatalf("Failed to generate profile: %v", err)
+	}
+
+	// Attempt connecting via nc to 1.1.1.1:443
+	cmd := exec.Command("sandbox-exec", "-p", profile, "/usr/bin/nc", "-z", "-w", "1", "1.1.1.1", "443")
+	if err := cmd.Run(); err == nil {
+		t.Errorf("SEC-02 FAILED: Expected raw socket egress to 1.1.1.1:443 to be blocked by kernel")
+	}
+}
+
 // TestSEC03_GitHookPersistenceDenial verifies that writing to .git/hooks is denied (V-03).
 func TestSEC03_GitHookPersistenceDenial(t *testing.T) {
 	if runtime.GOOS != "darwin" {
