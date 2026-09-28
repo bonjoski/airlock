@@ -134,6 +134,10 @@ func TestMCPServer_ToolCall_Exec(t *testing.T) {
 		t.Fatalf("Failed to parse ExecResult text: %v\nPayload: %s", err, toolRes.Content[0].Text)
 	}
 
+	if execRes.ExitCode != 0 && (strings.Contains(execRes.Error, "unprivileged user namespaces are disabled") || strings.Contains(execRes.Error, "bwrap")) {
+		t.Skip("bwrap not found or unprivileged userns disabled; skipping sandbox execution on host")
+	}
+
 	if execRes.ExitCode != 0 {
 		t.Errorf("Expected exit code 0, got %d, error: %s", execRes.ExitCode, execRes.Error)
 	}

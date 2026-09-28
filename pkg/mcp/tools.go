@@ -296,8 +296,15 @@ func (h *DefaultToolHandler) HandleExec(ctx context.Context, rawArgs json.RawMes
 
 	eng, err := sandbox.NewEngine(opts)
 	if err != nil {
+		res := ExecResult{
+			ExitCode:       1,
+			Error:          fmt.Sprintf("failed to initialize sandbox engine: %v", err),
+			Airgap:         airgap,
+			AllowedDomains: extraDomains,
+		}
+		resBytes, _ := json.MarshalIndent(res, "", "  ")
 		return &CallToolResult{
-			Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("failed to initialize sandbox engine: %v", err)}},
+			Content: []ContentItem{{Type: "text", Text: string(resBytes)}},
 			IsError: true,
 		}, nil
 	}
