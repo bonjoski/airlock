@@ -14,7 +14,11 @@ import (
 	"github.com/bonjoski/airlock/pkg/shim"
 )
 
-const version = "0.1.0"
+var (
+	version   = "1.0.0"
+	commit    = "unknown"
+	buildTime = "unknown"
+)
 
 func main() {
 	if len(os.Args) < 2 {
@@ -29,7 +33,11 @@ func main() {
 		printUsage()
 		os.Exit(0)
 	case "version", "-v", "--version":
-		fmt.Printf("Airlock version %s\n", version)
+		if commit != "unknown" && commit != "" {
+			fmt.Printf("Airlock version %s (%s, built %s)\n", version, commit, buildTime)
+		} else {
+			fmt.Printf("Airlock version %s\n", version)
+		}
 		os.Exit(0)
 	case "shim":
 		handleShim(os.Args[2:])

@@ -1,55 +1,132 @@
-# Airlock
+# Airlock 🛡️
 
-> **Minimalist Workstation Sandbox for Untrusted Package Installs & Agentic Loops**
+> **Minimalist Zero-Trust Workstation Sandbox for Untrusted Package Installs & Autonomous AI Coding Loops**
 
-Airlock (`boxpkg`) provides instant-startup, zero-VM process confinement for package manager installations and untrusted code execution.
+[![CI](https://github.com/bonjoski/airlock/actions/workflows/ci.yml/badge.svg)](https://github.com/bonjoski/airlock/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/bonjoski/airlock?color=blue)](https://github.com/bonjoski/airlock/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
----
-
-## 1. Executive Summary & Problem Statement
-
-Modern package managers execute arbitrary code at install time (`postinstall` hooks in npm, `setup.py` / wheels in pip, `build.rs` in cargo). 
-
-Standard terminal runs give these scripts unconfined read access to host credentials (`~/.ssh`, `~/.aws`, `~/.gnupg`), macOS Keychain daemons, and outbound network sockets. Airlock provides transparent, sub-second confinement directly on the workstation without the overhead of heavy virtual machines or containers.
+Airlock (`airlock`, aliased as `boxpkg`) provides sub-15ms, zero-VM process confinement for package manager installations (`npm`, `pip`, `cargo`, `uv`, `bun`, `pnpm`, `yarn`) and AI-generated script execution directly on developer workstations.
 
 ---
 
-## 2. Confinement Specifications
+## 🚀 Quick Install
 
-* **Filesystem Confinement:** Only `$PWD` (current workspace) and an isolated scratch directory (`/tmp/boxpkg-<pid>`) are writable. Secrets and host configuration dotfiles are strictly blocked.
-* **Keychain & Secrets Isolation:** Denies Mach IPC lookups to security/keychain daemons on macOS.
-* **Environment Sanitization:** Automatically strips sensitive environment variables matching `*TOKEN*`, `*KEY*`, `AWS_*`, and common API credentials before launching scripts.
-* **Network Egress Modes:** Supports offline airgap (`--airgap`) or restricted HTTPS egress to verified package registries only.
+### Option 1: Standalone Shell Installer (macOS & Linux)
+```bash
+curl -fsSL https://raw.githubusercontent.com/bonjoski/airlock/main/install.sh | sh
+```
+
+### Option 2: Homebrew (macOS & Linux)
+```bash
+brew install bonjoski/airlock/airlock
+```
+
+### Option 3: Go Install
+```bash
+go install github.com/bonjoski/airlock/cmd/airlock@latest
+```
 
 ---
 
-## 3. Isolation Matrix
+## ⚡ Key Features
 
-| Target Resource | Permission | Rationale & Implementation |
+* **Sub-15ms Startup Overhead:** Zero daemons, zero VMs, zero Docker containers.
+* **macOS Confinement Engine:** Native Apple Seatbelt sandbox with runtime dynamic scheme compilation and Mach IPC service lookup denials.
+* **Linux Container Engine:** Unprivileged user namespace isolation via Bubblewrap (`bwrap`) paired with custom Seccomp-BPF filters blocking `io_uring`, `ptrace`, and `TIOCSTI` terminal injection.
+* **Egress DNS & Proxy Shield:** In-process RFC 1035 UDP DNS forwarder and HTTPS forward proxy blocking DNS tunneling data exfiltration (`NXDOMAIN` on non-allowlisted domains).
+* **Transparent Toolchain Shims:** Automatic shimming for `npm`, `npx`, `pnpm`, `yarn`, `pip`, `pip3`, `cargo`, `uv`, and `bun` with recursion bypass.
+* **Argus Static Analysis Handoff:** Pre-execution heuristic scanner inspecting suspicious command patterns (`curl | sh`) and package lifecycle hooks.
+* **Structured Audit Logging:** Non-blocking JSON-lines security telemetry logged to `~/.airlock/audit.log`.
+
+---
+
+## 🛠️ Usage & CLI Reference
+
+### Run Commands in Sandbox
+```bash
+# Explicit run syntax
+airlock run -- npm install
+
+# Direct shorthand syntax
+airlock npm install
+airlock pip install -r requirements.txt
+airlock cargo build
+```
+
+### Offline Airgap Isolation
+Block all outbound network connections:
+```bash
+airlock --airgap npm install
+```
+
+### Allow Additional Registry Domains
+```bash
+airlock --allow-domain internal.artifactory.company.com npm install
+```
+
+### Manage Transparent Package Manager Shims
+Install shell shims in `~/.airlock/bin` so that running `npm`, `pip`, or `cargo` in your terminal automatically executes inside Airlock:
+```bash
+# Install transparent shims
+airlock shim install
+
+# Check status of installed shims
+airlock shim list
+
+# Remove shims
+airlock shim uninstall
+```
+
+### Pre-Execution Static Analysis (`--vet` / Argus)
+```bash
+# Scan command line and workspace manifests before sandbox entry
+airlock --vet npm install
+
+# Fail-closed on High or Critical severity findings
+airlock --vet-strict npm install
+```
+
+---
+
+## 🛡️ Security Confinement Matrix
+
+| Target Resource | Confinement Level | Enforcement Mechanism |
 | :--- | :---: | :--- |
-| **`$PWD` (Workspace)** | **Read-Write** | Package managers must write `node_modules`, lockfiles, build artifacts. |
-| **`/tmp/boxpkg-<pid>`** | **Read-Write** | Ephemeral scratch directory for intermediate compiler objects. |
-| **`~/.ssh`, `~/.aws`, `~/.gnupg`** | **BLOCKED (DENY)** | Complete denial of host secrets harvesting. |
-| **macOS Keychain / Daemons** | **BLOCKED (DENY)** | Deny Mach service lookups to security agents and credential stores. |
-| **Toolchains (`/usr`, `/bin`, `/lib`)** | **Read-Only** | Compilers and runtimes execute without modification rights. |
-| **Outbound Network** | **Restricted** | Only known package registry HTTPS endpoints permitted. |
+| **Workspace (`$PWD`)** | **Read-Write** | Permitted for build artifacts & `node_modules` (writes to `.git` denied). |
+| **Host Secrets (`~/.ssh`, `~/.aws`, `~/.gnupg`)** | **BLOCKED** | Absolute path Seatbelt rules (macOS) & mount masking (Linux). |
+| **Workspace Secrets (`.env`, `*.pem`)** | **BLOCKED** | Per-workspace secret scanning & filesystem read denials. |
+| **Keychain & Security IPC** | **BLOCKED** | Denies Mach lookup to `securityd`, `launchservicesd`, `pasteboard`. |
+| **Outbound Network Sockets** | **Restricted** | Ephemeral egress proxy & in-process RFC 1035 DNS filter. |
+| **System Calls (`io_uring`, `ptrace`, `TIOCSTI`)**| **BLOCKED** | Pure-Go compiled Seccomp-BPF filter. |
+| **Host Caches (`~/.npm`, `~/.cache/pip`, etc.)** | **Read-Only / Ephemeral**| Read-only mount + isolated staging scratch + atomic verified sync-back. |
 
 ---
 
-## 4. Implementation Roadmap (8 Weeks)
+## 🧪 Verification & Development
 
-* **Phase 1 (Weeks 1–3):** macOS Seatbelt profile synthesis (`sandbox-exec`), environment stripper.
-* **Phase 2 (Weeks 4–6):** Linux engine using unprivileged namespaces + Bubblewrap / Landlock LSM.
-* **Phase 3 (Weeks 7–8):** Registry-proxy egress filter, IDE integrations, and automated `vetpkg` (Argus) handoff.
+```bash
+# Run unit and integration tests
+make test
+
+# Run Go race condition tests
+make test-race
+
+# Run 18/18 Adversarial Security Verification Suite
+make test-sec
+
+# Run installer script test suite
+make test-install
+
+# Cross-compile for all supported architectures
+make cross-compile
+
+# Package release archives with sha256 checksums
+make package
+```
 
 ---
 
-## Project Specification
+## 📄 License
 
-Detailed PDF specification available in [project_plan.pdf](project_plan.pdf).
-
----
-
-## License
-
-This project is licensed under the [MIT License](LICENSE).
+MIT License — Copyright (c) 2026 Ben Skolmoski. See [LICENSE](LICENSE) for details.

@@ -7,7 +7,7 @@ LEGACY_ALIAS := boxpkg
 BIN_DIR := bin
 DIST_DIR := dist
 MAIN_PKG := ./cmd/airlock
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.1.0-dev")
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "1.0.0")
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
@@ -92,9 +92,14 @@ test-race: ## Run all tests with Go race detector enabled
 	go test -v -race ./...
 
 .PHONY: test-sec
-test-sec: ## Run adversarial security integration tests (SEC-01 through SEC-12)
+test-sec: ## Run adversarial security integration tests (SEC-01 through SEC-18)
 	@echo "==> Running security verification test battery..."
 	go test -v ./tests/...
+
+.PHONY: test-install
+test-install: ## Run install.sh script integration test suite
+	@echo "==> Running installer integration test suite..."
+	./tests/install_test.sh
 
 .PHONY: coverage
 coverage: ## Run tests and generate HTML coverage report
