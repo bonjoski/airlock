@@ -289,4 +289,3 @@ func handleShim(args []string) {
 		fmt.Printf("Unknown shim action: %s. Use 'install', 'uninstall', or 'list'.\n", action)
 	}
 }
-

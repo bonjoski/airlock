@@ -23,10 +23,10 @@ type Options struct {
 	KeepEnv        []string
 	NonInteractive bool
 	ScratchBase    string
-	AuditLogger    audit.Logger // Optional structured telemetry logger
-	VetEnabled     bool         // Enable Argus static analysis inspection
-	VetStrict      bool         // Fail closed on high/critical security findings
-	VetTool        string       // Path to external vetpkg/argus tool
+	AuditLogger    audit.Logger  // Optional structured telemetry logger
+	VetEnabled     bool          // Enable Argus static analysis inspection
+	VetStrict      bool          // Fail closed on high/critical security findings
+	VetTool        string        // Path to external vetpkg/argus tool
 	Inspector      vet.Inspector // Injected inspector interface
 	Stdout         io.Writer
 	Stderr         io.Writer

@@ -345,7 +345,7 @@ func (p *EgressProxy) handlePlainHTTP(client net.Conn, reader *bufio.Reader, ini
 		ClientAddr: clientAddr,
 	})
 
-	remoteAddr := fmt.Sprintf("%s:%d", host, port)
+	remoteAddr := net.JoinHostPort(host, strconv.Itoa(port))
 	remote, err := net.DialTimeout("tcp", remoteAddr, 10*time.Second)
 	if err != nil {
 		_, _ = client.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))

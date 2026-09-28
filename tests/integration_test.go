@@ -381,8 +381,8 @@ func TestSEC14_NestedAirlockBypass(t *testing.T) {
 		WorkspaceRoot: tempDir,
 	})
 	if err != nil {
-		if errors.Is(err, sandbox.ErrBwrapNotFound) {
-			t.Skip("bwrap not found on PATH; skipping on Linux host without bubblewrap")
+		if errors.Is(err, sandbox.ErrBwrapNotFound) || errors.Is(err, sandbox.ErrUsernsDisabled) {
+			t.Skip("bwrap not found or unprivileged userns disabled; skipping on host")
 		}
 		t.Fatalf("NewEngine failed: %v", err)
 	}
@@ -573,8 +573,8 @@ func TestSEC18_ArgusStaticAnalysisHandoff(t *testing.T) {
 
 	eng, err := sandbox.NewEngine(opts)
 	if err != nil {
-		if errors.Is(err, sandbox.ErrBwrapNotFound) {
-			t.Skip("bwrap not found on PATH; skipping on Linux host without bubblewrap")
+		if errors.Is(err, sandbox.ErrBwrapNotFound) || errors.Is(err, sandbox.ErrUsernsDisabled) {
+			t.Skip("bwrap not found or unprivileged userns disabled; skipping on host")
 		}
 		t.Fatalf("SEC-18 FAILED: NewEngine failed: %v", err)
 	}
@@ -610,8 +610,8 @@ func TestSEC18_ArgusStaticAnalysisHandoff(t *testing.T) {
 	}
 	mockEng, err := sandbox.NewEngine(mockOpts)
 	if err != nil {
-		if errors.Is(err, sandbox.ErrBwrapNotFound) {
-			t.Skip("bwrap not found on PATH; skipping on Linux host without bubblewrap")
+		if errors.Is(err, sandbox.ErrBwrapNotFound) || errors.Is(err, sandbox.ErrUsernsDisabled) {
+			t.Skip("bwrap not found or unprivileged userns disabled; skipping on host")
 		}
 		t.Fatalf("SEC-18 FAILED: NewEngine with custom Inspector failed: %v", err)
 	}
@@ -634,4 +634,3 @@ func (m *mockInspector) Inspect(ctx context.Context, cmdArgs []string, workspace
 		},
 	}, nil
 }
-
