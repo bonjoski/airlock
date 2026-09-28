@@ -3,6 +3,7 @@ package tests
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -19,6 +20,7 @@ import (
 	"github.com/bonjoski/airlock/pkg/config"
 	"github.com/bonjoski/airlock/pkg/env"
 	"github.com/bonjoski/airlock/pkg/interactive"
+	"github.com/bonjoski/airlock/pkg/mcp"
 	"github.com/bonjoski/airlock/pkg/proxy"
 	"github.com/bonjoski/airlock/pkg/sandbox"
 	"github.com/bonjoski/airlock/pkg/scratch"
@@ -938,3 +940,125 @@ func TestSEC25_ConfigInitAndValidation(t *testing.T) {
 		}
 	}
 }
+
+// TestSEC26_MCPSandboxConfinement verifies that MCP tool executions strictly inherit
+// zero-trust sandbox kernel confinement, blocking attempts by AI agents to read ~/.ssh (SEC-26).
+func TestSEC26_MCPSandboxConfinement(t *testing.T) {
+	tempDir := t.TempDir()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("SEC-26 FAILED: UserHomeDir failed: %v", err)
+	}
+
+	sshKeyPath := filepath.Join(homeDir, ".ssh", "id_rsa")
+	_ = os.WriteFile(sshKeyPath, []byte("mcp-agent-fake-key"), 0600)
+
+	server := mcp.NewServer(nil, nil)
+
+	// 1. Attempt unauthorized ~/.ssh read via airlock_exec tool call
+	reqJSON := fmt.Sprintf(`{
+		"jsonrpc": "2.0",
+		"id": 101,
+		"method": "tools/call",
+		"params": {
+			"name": "airlock_exec",
+			"arguments": {
+				"command": "/bin/cat %s",
+				"workspace": "%s",
+				"airgap": true
+			}
+		}
+	}`, sshKeyPath, tempDir)
+
+	resp, err := server.HandleMessage(context.Background(), []byte(reqJSON))
+	if err != nil {
+		t.Fatalf("SEC-26 FAILED: HandleMessage returned error: %v", err)
+	}
+	if resp.Error != nil {
+		t.Fatalf("SEC-26 FAILED: Unexpected RPC error: %+v", resp.Error)
+	}
+
+	toolRes, ok := resp.Result.(*mcp.CallToolResult)
+	if !ok || len(toolRes.Content) == 0 {
+		t.Fatalf("SEC-26 FAILED: Invalid tool result payload")
+	}
+
+	var execRes mcp.ExecResult
+	if err := json.Unmarshal([]byte(toolRes.Content[0].Text), &execRes); err != nil {
+		t.Fatalf("SEC-26 FAILED: Failed to parse ExecResult: %v", err)
+	}
+
+	if execRes.ExitCode == 0 {
+		t.Fatalf("SEC-26 FAILED: Critical security invariant violated: MCP execution bypassed ~/.ssh sandbox confinement!")
+	}
+}
+
+// TestSEC27_MCPVetAndPolicyCheck verifies that MCP vet and policy check tools accurately
+// detect threats, typosquatting packages, and guardrail boundaries for autonomous agents (SEC-27).
+func TestSEC27_MCPVetAndPolicyCheck(t *testing.T) {
+	tempDir := t.TempDir()
+	server := mcp.NewServer(nil, nil)
+
+	// 1. Test airlock_vet tool with backdoored package
+	vetReqJSON := `{
+		"jsonrpc": "2.0",
+		"id": 102,
+		"method": "tools/call",
+		"params": {
+			"name": "airlock_vet",
+			"arguments": {
+				"command": "npm install crossenv",
+				"strict": true
+			}
+		}
+	}`
+
+	vetResp, err := server.HandleMessage(context.Background(), []byte(vetReqJSON))
+	if err != nil {
+		t.Fatalf("SEC-27 FAILED: HandleMessage for vet error: %v", err)
+	}
+	vetToolRes, ok := vetResp.Result.(*mcp.CallToolResult)
+	if !ok || !vetToolRes.IsError {
+		t.Errorf("SEC-27 FAILED: Expected airlock_vet to return isError=true for malicious package")
+	}
+
+	// 2. Test airlock_policy_check tool for restricted path and env injection
+	cfgPath := filepath.Join(tempDir, "airlock.yaml")
+	_ = os.WriteFile(cfgPath, []byte("version: \"1\"\nmode: \"strict\"\n"), 0644)
+
+	policyReqJSON := fmt.Sprintf(`{
+		"jsonrpc": "2.0",
+		"id": 103,
+		"method": "tools/call",
+		"params": {
+			"name": "airlock_policy_check",
+			"arguments": {
+				"config_path": "%s",
+				"path": "/var/run/docker.sock",
+				"env_var": "DYLD_INSERT_LIBRARIES",
+				"domain": "evil-exfil.com"
+			}
+		}
+	}`, cfgPath)
+
+	polResp, err := server.HandleMessage(context.Background(), []byte(policyReqJSON))
+	if err != nil {
+		t.Fatalf("SEC-27 FAILED: HandleMessage for policy_check error: %v", err)
+	}
+	polToolRes := polResp.Result.(*mcp.CallToolResult)
+	var polRes mcp.PolicyCheckResult
+	if err := json.Unmarshal([]byte(polToolRes.Content[0].Text), &polRes); err != nil {
+		t.Fatalf("SEC-27 FAILED: Failed to unmarshal policy result: %v", err)
+	}
+
+	if polRes.PathCheck["guardrail_restricted"] != true {
+		t.Errorf("SEC-27 FAILED: Expected /var/run/docker.sock to be marked guardrail_restricted")
+	}
+	if polRes.EnvCheck["guardrail_restricted"] != true {
+		t.Errorf("SEC-27 FAILED: Expected DYLD_INSERT_LIBRARIES to be marked guardrail_restricted")
+	}
+	if polRes.DomainCheck["allowed"] == true {
+		t.Errorf("SEC-27 FAILED: Expected evil-exfil.com to be blocked")
+	}
+}
+

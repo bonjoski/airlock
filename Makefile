@@ -34,32 +34,39 @@ help: ## Display this help screen
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: build
-build: ## Build the optimized release binary in ./bin/airlock (and symlink bin/boxpkg)
+build: ## Build the optimized release binary in ./bin/airlock and bin/airlock-mcp
 	@mkdir -p $(BIN_DIR)
 	@echo "==> Building $(BINARY_NAME) $(VERSION)..."
 	go build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY_NAME) $(MAIN_PKG)
 	@ln -sf $(BINARY_NAME) $(BIN_DIR)/$(LEGACY_ALIAS)
-	@echo "==> Binary built: $(BIN_DIR)/$(BINARY_NAME) (aliased as $(BIN_DIR)/$(LEGACY_ALIAS))"
+	@echo "==> Building airlock-mcp $(VERSION)..."
+	go build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/airlock-mcp ./cmd/airlock-mcp
+	@echo "==> Binaries built: $(BIN_DIR)/$(BINARY_NAME), $(BIN_DIR)/airlock-mcp"
 
 .PHONY: build-debug
 build-debug: ## Build unoptimized debug binary with symbols
 	@mkdir -p $(BIN_DIR)
 	@echo "==> Building debug $(BINARY_NAME)..."
 	go build -race -o $(BIN_DIR)/$(BINARY_NAME)-debug $(MAIN_PKG)
-	@echo "==> Debug binary built: $(BIN_DIR)/$(BINARY_NAME)-debug"
+	go build -race -o $(BIN_DIR)/airlock-mcp-debug ./cmd/airlock-mcp
+	@echo "==> Debug binaries built in $(BIN_DIR)/"
 
 .PHONY: cross-compile
 cross-compile: ## Cross-compile release binaries for Darwin and Linux (amd64, arm64)
 	@mkdir -p $(DIST_DIR)
-	@echo "==> Cross-compiling $(BINARY_NAME) $(VERSION)..."
+	@echo "==> Cross-compiling $(BINARY_NAME) & airlock-mcp $(VERSION)..."
 	@echo "    -> darwin/arm64"
 	@CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)_darwin_arm64 $(MAIN_PKG)
+	@CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/airlock-mcp_darwin_arm64 ./cmd/airlock-mcp
 	@echo "    -> darwin/amd64"
 	@CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)_darwin_amd64 $(MAIN_PKG)
+	@CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/airlock-mcp_darwin_amd64 ./cmd/airlock-mcp
 	@echo "    -> linux/arm64"
 	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)_linux_arm64 $(MAIN_PKG)
+	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/airlock-mcp_linux_arm64 ./cmd/airlock-mcp
 	@echo "    -> linux/amd64"
 	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)_linux_amd64 $(MAIN_PKG)
+	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/airlock-mcp_linux_amd64 ./cmd/airlock-mcp
 	@echo "==> Cross-compilation complete in $(DIST_DIR)/"
 
 .PHONY: package

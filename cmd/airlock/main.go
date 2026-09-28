@@ -13,6 +13,7 @@ import (
 	"github.com/bonjoski/airlock/pkg/audit"
 	"github.com/bonjoski/airlock/pkg/config"
 	"github.com/bonjoski/airlock/pkg/interactive"
+	"github.com/bonjoski/airlock/pkg/mcp"
 	"github.com/bonjoski/airlock/pkg/pty"
 	"github.com/bonjoski/airlock/pkg/sandbox"
 	"github.com/bonjoski/airlock/pkg/shim"
@@ -52,6 +53,9 @@ func main() {
 	case "shim":
 		handleShim(os.Args[2:])
 		os.Exit(0)
+	case "mcp":
+		handleMCP(os.Args[2:])
+		os.Exit(0)
 	case "run":
 		handleRun(os.Args[2:])
 	default:
@@ -76,6 +80,7 @@ Usage:
   airlock config validate [--config <path>]
   airlock shim install [--target <dir>]
   airlock shim uninstall [--target <dir>]
+  airlock mcp
   airlock version
 
 Flags:
@@ -480,3 +485,12 @@ func handleShim(args []string) {
 		os.Exit(1)
 	}
 }
+
+func handleMCP(args []string) {
+	server := mcp.NewServer(os.Stdin, os.Stdout, mcp.WithVersion(version))
+	if err := server.Serve(context.Background()); err != nil {
+		fmt.Fprintf(os.Stderr, "airlock mcp: server error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
