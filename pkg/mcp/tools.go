@@ -12,6 +12,7 @@ import (
 
 	"github.com/bonjoski/airlock/pkg/audit"
 	"github.com/bonjoski/airlock/pkg/config"
+	"github.com/bonjoski/airlock/pkg/redact"
 	"github.com/bonjoski/airlock/pkg/sandbox"
 	"github.com/bonjoski/airlock/pkg/vet"
 )
@@ -315,8 +316,8 @@ func (h *DefaultToolHandler) HandleExec(ctx context.Context, rawArgs json.RawMes
 
 	res := ExecResult{
 		ExitCode:       exitCode,
-		Stdout:         stdoutBuf.String(),
-		Stderr:         stderrBuf.String(),
+		Stdout:         redact.RedactString(stdoutBuf.String()),
+		Stderr:         redact.RedactString(stderrBuf.String()),
 		DurationMs:     duration.Milliseconds(),
 		Airgap:         airgap,
 		AllowedDomains: extraDomains,

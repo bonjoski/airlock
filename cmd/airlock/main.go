@@ -15,12 +15,13 @@ import (
 	"github.com/bonjoski/airlock/pkg/interactive"
 	"github.com/bonjoski/airlock/pkg/mcp"
 	"github.com/bonjoski/airlock/pkg/pty"
+	"github.com/bonjoski/airlock/pkg/redact"
 	"github.com/bonjoski/airlock/pkg/sandbox"
 	"github.com/bonjoski/airlock/pkg/shim"
 )
 
 var (
-	version   = "1.1.0"
+	version   = "0.5.0"
 	commit    = "unknown"
 	buildTime = "unknown"
 )
@@ -370,6 +371,11 @@ func handleRun(args []string) {
 		promptHandler = prompter.PromptDomain
 	}
 
+	redactingStdout := redact.NewWriter(os.Stdout)
+	defer func() { _ = redactingStdout.Close() }()
+	redactingStderr := redact.NewWriter(os.Stderr)
+	defer func() { _ = redactingStderr.Close() }()
+
 	opts := sandbox.Options{
 		WorkspaceRoot:   resolvedWorkspace,
 		ConfigPath:      discoveredConfigPath,
@@ -390,8 +396,8 @@ func handleRun(args []string) {
 		VetTool:         vetTool,
 		IgnoredVetRules: ignoredVetRules,
 		PromptHandler:   promptHandler,
-		Stdout:          os.Stdout,
-		Stderr:          os.Stderr,
+		Stdout:          redactingStdout,
+		Stderr:          redactingStderr,
 		Stdin:           os.Stdin,
 	}
 

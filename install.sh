@@ -11,7 +11,7 @@
 set -eu
 
 REPO="bonjoski/airlock"
-DEFAULT_VERSION="v1.0.0"
+DEFAULT_VERSION="v0.5.0"
 
 # Color helpers (disabled if not connected to a terminal)
 if [ -t 1 ]; then
@@ -248,6 +248,11 @@ fi
 mv "${TMP_DIR}/airlock" "${INSTALL_DIR}/airlock"
 chmod 755 "${INSTALL_DIR}/airlock"
 ln -sf airlock "${INSTALL_DIR}/boxpkg"
+
+if [ -f "${TMP_DIR}/airlock-mcp" ]; then
+    mv "${TMP_DIR}/airlock-mcp" "${INSTALL_DIR}/airlock-mcp"
+    chmod 755 "${INSTALL_DIR}/airlock-mcp"
+fi
 
 log_success "Airlock binary installed successfully to ${INSTALL_DIR}/airlock"
 

@@ -7,7 +7,7 @@ LEGACY_ALIAS := boxpkg
 BIN_DIR := bin
 DIST_DIR := dist
 MAIN_PKG := ./cmd/airlock
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "1.0.0")
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.5.0")
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
@@ -77,6 +77,7 @@ package: cross-compile ## Package release tarballs and generate sha256 checksums
 		rm -rf $$tar_dir; \
 		mkdir -p $$tar_dir; \
 		cp $(DIST_DIR)/$(BINARY_NAME)_$$target $$tar_dir/$(BINARY_NAME); \
+		cp $(DIST_DIR)/airlock-mcp_$$target $$tar_dir/airlock-mcp; \
 		ln -sf $(BINARY_NAME) $$tar_dir/$(LEGACY_ALIAS); \
 		[ -f README.md ] && cp README.md $$tar_dir/ || true; \
 		[ -f LICENSE ] && cp LICENSE $$tar_dir/ || true; \
