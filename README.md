@@ -1,214 +1,373 @@
 # Airlock 🛡️
 
-> **Minimalist Zero-Trust Workstation Sandbox for Untrusted Package Installs & Autonomous AI Coding Loops**
+> **Minimalist Zero-Trust Workstation Sandbox for Untrusted Package Installs & Autonomous AI Coding Agents**  
+> *Target Startup Overhead: <15ms (Measured: ~7.9ms) | Footprint: Zero-VM / Zero-Daemon | Platform: macOS & Linux*  
 
 [![CI](https://github.com/bonjoski/airlock/actions/workflows/ci.yml/badge.svg)](https://github.com/bonjoski/airlock/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/bonjoski/airlock?color=blue)](https://github.com/bonjoski/airlock/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![Sigstore Cosign](https://img.shields.io/badge/Signed_with-Sigstore_Cosign-blueviolet.svg)](https://docs.sigstore.dev)
 
-Airlock (`airlock`, aliased as `boxpkg`) provides sub-15ms, zero-VM process confinement for package manager installations (`npm`, `pip`, `cargo`, `uv`, `bun`, `pnpm`, `yarn`) and AI coding agent execution directly on developer workstations.
+Airlock (`airlock`, aliased as `boxpkg`) provides sub-8ms, zero-VM process confinement for package managers (`npm`, `pip`, `cargo`, `uv`, `bun`, `pnpm`, `yarn`) and autonomous AI coding agents (Claude Desktop, Cursor, Gemini CLI, Antigravity) directly on developer workstations.
 
 ---
 
-## 🚀 Quick Install
+## 🛑 Why Airlock is Needed (The Problem)
 
-### Option 1: Standalone Shell Installer (macOS & Linux)
+### 1. Package Managers Run Arbitrary Code as You
+Every modern package manager executes arbitrary code during installation and build routines:
+* **Node.js**: `preinstall`, `postinstall`, `prepare` lifecycle scripts in `package.json`
+* **Python**: Dynamic execution inside `setup.py` / `pip install`
+* **Rust**: Unrestricted host build scripts in `build.rs`
+* **Ruby**: Native C extension builders in `extconf.rb` / `Rakefile`
+
+A single typosquatted, hijacked, or malicious dependency executes with **your exact user permissions**, giving attackers instant access to:
+* **Host Secrets:** `~/.ssh/id_rsa`, `~/.aws/credentials`, `~/.gnupg`, `~/.kube/config`, `~/.config/gcloud`
+* **Workspace Secrets:** `.env`, `.env.local`, `*.pem`, database credentials, private API keys
+* **Persistent Backdoors:** Writing malicious git hooks into `.git/hooks/pre-commit` or poisoning `.git/config`
+* **Network Exfiltration:** Bypassing advisory proxy settings via raw TCP sockets, DNS tunneling, or reverse shells
+* **Host Daemon Escapes:** Accessing `/var/run/docker.sock` to spawn privileged root containers
+
+### 2. AI Coding Agents Execute Shell Loops on Your Machine
+Autonomous coding agents (Claude Desktop, Cursor, Gemini CLI, Antigravity, Claude Code) routinely run terminal commands and install dependencies to solve programming tasks. Without kernel sandboxing, a hallucinated package name or an indirect prompt injection attack in untrusted code can compromise your entire system.
+
+### 3. Traditional Sandboxes & VMs Don't Work for Workstations
+* **Docker / VMs:** Heavyweight, slow startup (>2-5s), broken filesystem permissions, cold package cache penalties (>90s downloads), and complex port forwarding.
+* **Advisory Env (`HTTP_PROXY`):** Malicious binaries simply ignore environment variables and make direct raw socket connections or UDP DNS tunneling queries.
+
+---
+
+## 💡 How Airlock Solves It
+
+Airlock enforces **Kernel-Level Zero-Trust Confinement** without VMs, daemons, or performance degradation:
+
+```mermaid
+flowchart TD
+    subgraph Host["Developer Workstation & AI Runtime"]
+        User["Developer Shell / AI Coding Agent"]
+        CLI["Airlock CLI (airlock / airlock-mcp)"]
+    end
+
+    subgraph DefenseLayer["Airlock Zero-Trust Protection Layer"]
+        PTY["1. Dedicated PTY Allocation<br/>(Neutralizes TIOCSTI terminal injection)"]
+        ENV["2. POSIX Environment Scrubbing<br/>(Drops cloud tokens, AWS/GCP keys, DB URIs)"]
+        PROXY["3. Ephemeral Forward Proxy & DNS Interceptor<br/>(RFC 1035 UDP forwarder; NXDOMAIN on DNS tunnels)"]
+        CACHE["4. Read-Only Host Package Caches<br/>(~/.npm, ~/.cache/pip, ~/.cargo + staging write-layer)"]
+        SCRATCH["5. Ephemeral 0700 Scratch Space<br/>(Cryptographic mkdtemp /tmp/boxpkg-XXXXXXXXXXXX)"]
+        ARGUS["6. Argus Pre-Execution Static Vetting<br/>(Typosquats, obfuscated setup.py, build.rs backdoors)"]
+        REDACT["7. Dynamic In-Stream Output Secret Redactor<br/>(Masks leaked API keys/tokens before stdout/LLM response)"]
+    end
+
+    subgraph OSKernel["Kernel Sandbox Engine"]
+        DARWIN["macOS Seatbelt Engine (sandbox-exec)<br/>• Absolute {{.UserHome}} Path Interpolation<br/>• Deny Mach: Keychain, LaunchServices, Pasteboard, TCC<br/>• Deny /private/tmp launchd ssh-agent listeners<br/>• Deny .git write & .env* read in workspace<br/>• Kernel TCP egress strictly to 127.0.0.1:ProxyPort"]
+        LINUX["Linux Engine (bwrap + Seccomp-BPF)<br/>• Unprivileged CLONE_NEWUSER & CLONE_NEWNET<br/>• Seccomp: Block io_uring, ptrace, TIOCSTI, bpf<br/>• Abstract Unix domain socket isolation (@X11, @dbus)"]
+    end
+
+    User --> CLI
+    CLI --> PTY --> ENV --> PROXY --> CACHE --> SCRATCH --> ARGUS
+    ARGUS --> OSKernel
+    OSKernel --> REDACT
+    REDACT --> Target["Confined Process Execution<br/>(npm install, pip install, cargo build, agent loop)"]
+```
+
+---
+
+## 🚀 Quickstart (Zero to Protected in 60 Seconds)
+
+### Step 1: Install Airlock
+
+#### Option A: Standalone POSIX Installer (macOS & Linux)
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bonjoski/airlock/main/install.sh | sh
 ```
 
-### Option 2: Homebrew (macOS & Linux)
+#### Option B: Homebrew (macOS & Linux)
 ```bash
 brew install bonjoski/airlock/airlock
 ```
 
-### Option 3: Go Install
+#### Option C: Go Install
 ```bash
 go install github.com/bonjoski/airlock/cmd/airlock@latest
+go install github.com/bonjoski/airlock/cmd/airlock-mcp@latest
 ```
 
 ---
 
-## ⚡ Benchmark SLA Performance Results
+### Step 2: Verify System Readiness (`airlock doctor`)
+Run system diagnostics to verify kernel sandbox drivers, cache directories, and loopback proxies:
+```bash
+airlock doctor
+```
+```
+Airlock Doctor — System Diagnostics & Health Report
+==================================================
+Platform:       darwin/arm64
+Workspace Root: /Users/username/my-project
 
-Airlock is engineered for ultra-low latency workstation execution, eliminating VM and container startup overhead while strictly maintaining kernel-level zero-trust invariants:
+[Platform Sandbox Primitives]
+  ✓ PASS sandbox-seatbelt-exec: macOS Seatbelt executable (sandbox-exec)
+  ✓ PASS sandbox-seatbelt-profile: macOS Seatbelt profile synthesis (Seatbelt SBPL)
 
-| Benchmark Operation | SLA Target | Measured Performance | Result |
+[Storage & Permissions]
+  ✓ PASS storage-airlock-dir: Airlock state directory (~/.airlock) is writable
+  ✓ PASS storage-npm-cache: Node / npm cache (~/.npm) is accessible
+  ✓ PASS storage-cargo-cache: Rust / Cargo cache (~/.cargo/registry) is accessible
+  ✓ PASS storage-scratch-dirs: Ephemeral scratch directory creation (mode 0700)
+
+[Network & Proxy]
+  ✓ PASS network-port-binding: Loopback socket binding (127.0.0.1) verified
+  ✓ PASS network-dns-filter: In-process DNS filtering proxy active
+
+[Toolchain Shims]
+  ✓ PASS shims-path-configured: Toolchain shims active in $PATH (~/.airlock/bin)
+
+Summary: 10 passed, 0 warnings, 0 failures (System HEALTHY)
+```
+
+---
+
+### Step 3: Enable Transparent Package Manager Shims
+Install lightweight shell shims for `npm`, `npx`, `pnpm`, `yarn`, `pip`, `pip3`, `cargo`, `uv`, and `bun`:
+```bash
+airlock shim install
+```
+Add `~/.airlock/bin` to your `~/.zshrc` or `~/.bashrc`:
+```bash
+export PATH="$HOME/.airlock/bin:$PATH"
+```
+🎉 **That's it!** All future `npm install`, `pip install`, and `cargo build` commands run automatically inside zero-trust kernel sandboxes with zero behavioral changes.
+
+---
+
+### Step 4: Run Commands Manually
+You can also run commands explicitly through Airlock:
+```bash
+# Shorthand syntax
+airlock npm install
+airlock pip install -r requirements.txt
+airlock cargo build
+airlock bun add lodash
+
+# Explicit syntax with custom allowed network domains
+airlock run --allow-domain api.mycorp.internal -- npm install
+```
+
+---
+
+## 🤖 AI Assistant & IDE Integration (Model Context Protocol)
+
+Airlock includes a dedicated, high-performance **Model Context Protocol (MCP)** server (`airlock-mcp` or `airlock mcp`) providing autonomous AI coding agents with zero-trust execution, pre-execution threat vetting, and security policy introspection.
+
+### 1. Claude Desktop Setup
+Add the following to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `~/.config/Claude/claude_desktop_config.json` (Linux):
+```json
+{
+  "mcpServers": {
+    "airlock": {
+      "command": "airlock-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+### 2. Cursor IDE Setup
+Add the following to `.cursor/mcp.json` in your project workspace:
+```json
+{
+  "mcpServers": {
+    "airlock": {
+      "command": "airlock-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+### 3. Gemini CLI / Antigravity Setup
+Add to your agent configuration settings:
+```json
+{
+  "mcpServers": {
+    "airlock": {
+      "command": "airlock",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+---
+
+### MCP Capabilities Reference
+
+#### Tools
+* **`airlock_exec`**: Safely executes shell commands inside sandboxed confinement with strict network domain filtering, directory masking, and dynamic secret redaction.
+* **`airlock_vet`**: Runs Argus static heuristics to detect typosquatting packages, obfuscated `setup.py` scripts, and malicious `build.rs` outbound connections prior to execution.
+* **`airlock_policy_check`**: Inspects whether specific egress domains, filesystem paths, or environment variables comply with active policy and invariant guardrails.
+
+#### Resources
+* **`airlock://audit/recent`**: Tail of the last 50 structured audit records (executions, denied egress attempts, blocked DNS tunneling).
+* **`airlock://policy/active`**: Active project `airlock.yaml` policy, effective allowlists, and immutable security guardrails.
+* **`airlock://health`**: Real-time system sandbox isolation status and kernel capability health.
+
+#### Prompts
+* **`security_review`**: Guides the AI assistant to perform comprehensive supply chain and security reviews on workspace code.
+* **`pre_install_audit`**: Prompt template for evaluating third-party dependencies before installation.
+* **`sandbox_troubleshoot`**: Diagnostic prompt for analyzing permission denials or blocked network domains.
+
+---
+
+## ⚡ Performance Benchmarks (< 15ms SLA Target)
+
+Airlock is engineered for developer workstation use without noticeable latency overhead:
+
+| Benchmark Operation | Target SLA | Measured Performance | Margin vs Target |
 | :--- | :---: | :---: | :---: |
-| **Sandbox Process Invocation Overhead** | `< 15.00 ms` | **7.88 ms / op** (~6.35 ms overhead vs 1.53 ms baseline) | **PASSED (1.9x faster than SLA)** |
-| **Ephemeral Egress Proxy Handshake** | `< 2.00 ms` | **0.15 ms / op** (153.78 µs) | **PASSED (13x faster than SLA)** |
-| **Ephemeral Proxy Data Throughput** | `> 500 MB/s` | **1,145.99 MB/s** (1.14 GB/s) | **PASSED (2.3x throughput target)** |
-| **In-Process DNS Forwarder UDP Latency** | `< 5.00 ms` | **0.026 ms / op** (26.59 µs) | **PASSED (188x faster than SLA)** |
-| **Argus Command Line Inspection** | `< 1.00 ms` | **0.052 ms / op** (52.43 µs) | **PASSED (19x faster than SLA)** |
-| **Argus Workspace Manifest Parsing** | `< 5.00 ms / file` | **0.125 ms / op** (125.64 µs / 4 files) | **PASSED (40x faster than SLA)** |
+| **Sandbox Process Invocation Overhead** | `< 15.00 ms` | **7.88 ms / op** (~6.35 ms overhead vs 1.53 ms baseline) | **1.9x faster** |
+| **Ephemeral Egress Proxy Handshake** | `< 2.00 ms` | **0.15 ms / op** (153.78 µs) | **13x faster** |
+| **Proxy Data Throughput** | `> 500 MB/s` | **1,145.99 MB/s** (1.14 GB/s) | **2.3x higher** |
+| **In-Process DNS Forwarder UDP Latency** | `< 5.00 ms` | **0.026 ms / op** (26.59 µs) | **188x faster** |
+| **Argus Command Line Inspection** | `< 1.00 ms` | **0.052 ms / op** (52.43 µs) | **19x faster** |
+| **Argus Manifest Parsing** | `< 5.00 ms / file` | **0.125 ms / op** (125.64 µs / 4 files) | **40x faster** |
 
 *Benchmarked on Apple Silicon (M3 Max, macOS Darwin arm64) using `go test -v -bench=. ./tests/benchmark_test.go`.*
 
 ---
 
-## 🛠️ Complete Subcommands Reference
+## 🛠️ CLI Subcommands Overview
 
-### 1. Execute Confined Commands (`airlock run` / Shorthand)
+### 1. `airlock run` (or `airlock <cmd>`)
+Executes commands inside kernel-confined isolation:
 ```bash
-# Explicit syntax
-airlock run -- npm install
-
-# Direct shorthand syntax
-airlock npm install
-airlock pip install -r requirements.txt
-airlock cargo build
-airlock bun add lodash
+airlock run -- npm test
+airlock run --airgap -- pytest
+airlock run --allow-domain api.openai.com -- python agent.py
 ```
 
-### 2. System Diagnostics & Readiness (`airlock doctor`)
-Diagnoses kernel sandbox drivers (Apple Seatbelt / Linux bwrap + Seccomp), shim installation status, scratch space permissions, audit logging, and declarative policy health:
+### 2. `airlock doctor`
+Inspects host sandbox readiness, permissions, loopback proxy, and toolchain shims:
 ```bash
-# Human-readable terminal output with colored status checkmarks
 airlock doctor
-
-# Machine-readable JSON output
 airlock doctor --json
-
-# Diagnose a specific workspace directory
 airlock doctor --workspace /path/to/project
 ```
 
-### 3. Telemetry & Security Violation Query Engine (`airlock audit`)
-Search, filter, tail, and export structured JSON-lines telemetry recorded in `~/.airlock/audit.log`:
+### 3. `airlock audit`
+Query, tail, and analyze security telemetry in `~/.airlock/audit.log`:
 ```bash
-# Display recent audit records (executions, egress requests, DNS queries, security violations)
-airlock audit list --limit 25
+# List recent audit events
+airlock audit list --limit 20
 
-# Filter by event type and status
+# Filter by type and status
 airlock audit list --type network --status deny
-airlock audit list --type dns --search tunnel
-airlock audit list --type security
+airlock audit list --type dns --status deny
 
-# Stream and follow live audit events in real-time
+# Live tailing of all sandboxed activity
 airlock audit tail -f
 
-# Display aggregated telemetry statistics (executions, blocked egress, DNS tunneling, top domains)
+# Aggregated summary statistics
 airlock audit stats
 
-# Export audit logs for SIEM or incident review
-airlock audit export --format json --output /tmp/audit_export.json
-airlock audit export --format csv --output /tmp/audit_export.csv
-
-# Clear audit log
-airlock audit clear
+# Export audit trail to JSON or CSV for SIEM ingestion
+airlock audit export --format json --output /tmp/audit.json
+airlock audit export --format csv --output /tmp/audit.csv
 ```
 
-### 4. Declarative Policy Management (`airlock init` & `airlock config`)
+### 4. `airlock init` & `airlock config`
+Scaffold and validate declarative `airlock.yaml` workspace policies:
 ```bash
-# Scaffold a declarative airlock.yaml policy tailored to your project
+# Generate project policy
 airlock init --type node      # Options: node, python, rust, go, general
 
-# Validate an existing policy against immutable security invariant guardrails
+# Validate policy against immutable security guardrails
 airlock config validate --config ./airlock.yaml
 ```
 
-### 5. Transparent Toolchain Shims (`airlock shim`)
-Intercept package managers automatically in your shell without typing `airlock`:
+### 5. `airlock shim`
+Manage transparent package manager shims:
 ```bash
-# Install shims in ~/.airlock/bin
 airlock shim install
-
-# List active shim status
 airlock shim list
-
-# Remove installed shims
 airlock shim uninstall
 ```
 
-### 6. Model Context Protocol Server (`airlock mcp`)
-Launch the standalone Model Context Protocol stdio server for AI coding assistants:
+---
+
+## 🛡️ 32/32 Adversarial Security Verification Battery
+
+Every CI build executes an automated suite of adversarial attack simulations validating that root zero-trust invariants cannot be bypassed:
+
+| Test ID | Test Name | Invariant | Attack Simulation | Status |
+| :--- | :--- | :---: | :--- | :---: |
+| **SEC-01** | `TestSEC01_SSHReadDenial` | **V-01** | Evaluates absolute path interpolation for `~/.ssh/id_rsa`. | **[PASS]** |
+| **SEC-02** | `TestSEC02_RawSocketEgressDenial` | **V-02** | Raw outbound TCP socket connection attempting proxy bypass (`1.1.1.1:443`). | **[PASS]** |
+| **SEC-03** | `TestSEC03_GitHookPersistenceDenial` | **V-03** | Trojan drop into `$PWD/.git/hooks/pre-commit`. | **[PASS]** |
+| **SEC-04** | `TestSEC04_WorkspaceSecretDenial` | **V-04** | Reading workspace secrets (`.env`, `.env.local`, `*.pem`, `secrets.json`). | **[PASS]** |
+| **SEC-05** | `TestSEC05_EnvSanitization` | **V-07** | POSIX environment allowlist scrubbing credentials and PATH sanitization. | **[PASS]** |
+| **SEC-06** | `TestSEC06_DockerSocketDenial` | **V-06** | Accessing `/var/run/docker.sock` to trigger root container escape. | **[PASS]** |
+| **SEC-07** | `TestSEC07_UsernsFailClosed` | **V-07** | Simulating disabled unprivileged user namespaces on hardened Linux. | **[PASS]** |
+| **SEC-08** | `TestSEC08_ExitCodePropagation` | — | Precise propagation of exit codes and termination signals from sandbox child. | **[PASS]** |
+| **SEC-09** | `TestSEC09_IOUringSeccompDenial` | **V-09** | Linux `sys_io_uring_setup`, `ptrace`, and `TIOCSTI` ioctl Seccomp-BPF denial. | **[PASS]** |
+| **SEC-10** | `TestSEC10_AbstractSocketNetnsDetachment`| **V-09** | Connecting to abstract Unix domain sockets (`@X11`, `@dbus`) via `CLONE_NEWNET`. | **[PASS]** |
+| **SEC-11** | `TestSEC11_ProxyDomainWhitelisting` | **V-02** | Ephemeral forward proxy TLS SNI whitelist enforcement. | **[PASS]** |
+| **SEC-12** | `TestSEC12_ScratchOrphanCleanup` | **V-11** | Cryptographic `mkdtemp` (0700) and scavenger purge of abandoned dirs > 24h. | **[PASS]** |
+| **SEC-13** | `TestSEC13_CacheStagingAndSync` | **V-12** | Read-only host cache mounts with ephemeral staging and verified sync-back. | **[PASS]** |
+| **SEC-14** | `TestSEC14_NestedAirlockBypass` | — | `__AIRLOCK_ACTIVE=1` recursion bypass for nested toolchain invocations. | **[PASS]** |
+| **SEC-15** | `TestSEC15_DNSTunnelingNeutralization` | **V-08** | In-process RFC 1035 UDP DNS forwarder returning `NXDOMAIN` on non-whitelisted domains. | **[PASS]** |
+| **SEC-16** | `TestSEC16_AuditLogging` | — | Structured JSON-lines audit logging to `~/.airlock/audit.log` (0600 permissions). | **[PASS]** |
+| **SEC-17** | `TestSEC17_ShimRecursionPrevention` | **V-14** | Transparent shell shims execution without recursion crashes. | **[PASS]** |
+| **SEC-18** | `TestSEC18_ArgusStaticAnalysisHandoff` | — | Argus heuristic analysis and external `vetpkg` binary handoff. | **[PASS]** |
+| **SEC-19** | `TestSEC19_TyposquattingInterception` | — | Pre-execution interception of known typosquats (`crossenv`, `reqeusts`). | **[PASS]** |
+| **SEC-20** | `TestSEC20_RustBuildRsNetworkInterception`| — | Argus detection of outbound network sockets inside Rust `build.rs`. | **[PASS]** |
+| **SEC-21** | `TestSEC21_SetupPyObfuscationInterception`| — | Interception of obfuscated base64 and reverse shell payloads in Python `setup.py`. | **[PASS]** |
+| **SEC-22** | `TestSEC22_DeclarativeConfigDomainAllow` | — | Declarative `airlock.yaml` custom domain and wildcard allowlists. | **[PASS]** |
+| **SEC-23** | `TestSEC23_DeclarativeConfigGuardrailDenial`| — | Guardrail rejection preventing `airlock.yaml` from overriding zero-trust boundaries. | **[PASS]** |
+| **SEC-24** | `TestSEC24_InteractiveCapabilityGrantPrompt`| — | Dynamic interactive terminal prompts for unknown network domains. | **[PASS]** |
+| **SEC-25** | `TestSEC25_ConfigInitAndValidation` | — | Policy scaffolding (`airlock init`) and validation against guardrails. | **[PASS]** |
+| **SEC-26** | `TestSEC26_MCPSandboxConfinement` | — | Verifying MCP `airlock_exec` executes strictly inside zero-trust kernel sandbox. | **[PASS]** |
+| **SEC-27** | `TestSEC27_MCPVetAndPolicyCheck` | — | MCP `airlock_vet` and `airlock_policy_check` tool threat detection and guardrails. | **[PASS]** |
+| **SEC-28** | `TestSEC28_DoctorHealthyEnvironment` | — | `airlock doctor` diagnostic suite verifying platform, shims, and scratch health. | **[PASS]** |
+| **SEC-29** | `TestSEC29_AuditQueryCapturesThreats` | — | `airlock audit` query engine indexing blocked egress, DNS tunneling, and CSV export. | **[PASS]** |
+| **SEC-30** | `TestSEC30_MCPExtensions` | — | MCP protocol compliance for resources (`audit`, `policy`, `health`) and prompts. | **[PASS]** |
+| **SEC-31** | `TestSEC31_ExtendedSupplyChainThreats` | — | Argus static analysis detection across Go, Ruby, and Obfuscated Shell pipelines. | **[PASS]** |
+| **SEC-32** | `TestSEC32_SecretRedaction` | **V-24** | Dynamic in-stream secret redactor masking API keys/tokens across stdout & MCP. | **[PASS]** |
+
+---
+
+## 🔏 Cryptographic Provenance (Sigstore Cosign)
+
+Every official Airlock release artifact is cryptographically signed using **Sigstore Cosign Keyless OIDC**. Verification is logged publicly in the Rekor transparency log.
+
+To manually verify the provenance of any release:
 ```bash
-airlock mcp
+cosign verify-blob \
+  --bundle checksums.txt.bundle \
+  --certificate-identity-regexp "^https://github.com/bonjoski/airlock/" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  checksums.txt
 ```
 
 ---
 
-## 🤖 Model Context Protocol (MCP) Ecosystem
-
-Airlock exposes native MCP server interfaces connecting directly to **Claude Desktop**, **Cursor IDE**, **Gemini CLI**, **Antigravity (AGY)**, and **Claude Code**.
-
-### Tools
-| Tool Name | Parameters | Description |
-| :--- | :--- | :--- |
-| **`airlock_exec`** | `command`, `args`, `workspace`, `config_path`, `airgap`, `allow_domains`, `keep_env`, `timeout_seconds` | Executes shell commands inside zero-trust OS sandbox confinement with fail-closed egress filtering and audit logging. |
-| **`airlock_vet`** | `command`, `workspace`, `strict` | Performs Argus static analysis to detect typosquatting (`crossenv`, `reqeusts`), obfuscated `setup.py`, and suspicious `build.rs` network hooks. |
-| **`airlock_policy_check`** | `workspace`, `config_path`, `domain`, `path`, `env_var` | Verifies whether target domains, filesystem paths, or environment variables comply with `airlock.yaml` and immutable guardrails. |
-
-### Resources
-| Resource URI | MIME Type | Description |
-| :--- | :---: | :--- |
-| **`airlock://audit/recent`** | `application/json` | Retrieves the latest 50 security telemetry and execution records from `~/.airlock/audit.log`. |
-| **`airlock://policy/active`** | `application/json` | Discovers and formats active declarative policy rules and immutable security guardrails for the workspace. |
-| **`airlock://health`** | `application/json` | Returns sandbox backend health, kernel capability status, and writable scratch availability. |
-
-### Prompts
-| Prompt Name | Arguments | Description |
-| :--- | :--- | :--- |
-| **`security_review`** | `target_path` (req), `context` | Instructs the AI assistant to perform a comprehensive security analysis on target files or manifests using Argus. |
-| **`pre_install_audit`** | `package_name` (req), `ecosystem`, `version` | Guides the AI assistant through supply-chain risk assessment before installing any new package dependency. |
-| **`sandbox_troubleshoot`** | `error_message` (req), `command`, `domain` | Assists in diagnosing and troubleshooting sandboxing denials, network proxy blocks, or environment variable issues. |
-
----
-
-## 🛡️ 31/31 Adversarial Security Verification Suite
-
-Every CI build runs automated adversarial attack simulations validating that root zero-trust invariants cannot be bypassed:
-
-| ID | Test Name | Audit Ref | Attack Simulation | Status |
-| :--- | :--- | :---: | :--- | :---: |
-| **SEC-01** | `TestSEC01_SSHReadDenial` | **V-01** | Evaluates absolute path interpolation for `~/.ssh/id_rsa`. | **PASSED** |
-| **SEC-02** | `TestSEC02_RawSocketEgressDenial` | **V-02** | Raw outbound TCP socket connection attempting proxy bypass (`1.1.1.1:443`). | **PASSED** |
-| **SEC-03** | `TestSEC03_GitHookPersistenceDenial` | **V-03** | Trojan drop into `$PWD/.git/hooks/pre-commit`. | **PASSED** |
-| **SEC-04** | `TestSEC04_WorkspaceSecretDenial` | **V-04** | Reading workspace secrets (`.env`, `.env.local`, `*.pem`, `secrets.json`). | **PASSED** |
-| **SEC-05** | `TestSEC05_EnvSanitization` | **V-07** | POSIX environment allowlist scrubbing credentials and PATH sanitization. | **PASSED** |
-| **SEC-06** | `TestSEC06_DockerSocketDenial` | **V-06** | Accessing `/var/run/docker.sock` to trigger root container escape. | **PASSED** |
-| **SEC-07** | `TestSEC07_UsernsFailClosed` | **V-07** | Simulating disabled unprivileged user namespaces on hardened Linux. | **PASSED** |
-| **SEC-08** | `TestSEC08_ExitCodePropagation` | — | Precise propagation of exit codes and termination signals from sandbox child. | **PASSED** |
-| **SEC-09** | `TestSEC09_IOUringSeccompDenial` | **V-09** | Linux `sys_io_uring_setup`, `ptrace`, and `TIOCSTI` ioctl Seccomp-BPF denial. | **PASSED** |
-| **SEC-10** | `TestSEC10_AbstractSocketNetnsDetachment`| **V-09** | Connecting to abstract Unix domain sockets (`@X11`, `@dbus`) via `CLONE_NEWNET`. | **PASSED** |
-| **SEC-11** | `TestSEC11_ProxyDomainWhitelisting` | **V-02** | Ephemeral forward proxy TLS SNI whitelist enforcement. | **PASSED** |
-| **SEC-12** | `TestSEC12_ScratchOrphanCleanup` | **V-11** | Cryptographic `mkdtemp` (0700) and scavenger purge of abandoned dirs > 24h. | **PASSED** |
-| **SEC-13** | `TestSEC13_CacheStagingAndSync` | **V-12** | Read-only host cache mounts with ephemeral staging and verified sync-back. | **PASSED** |
-| **SEC-14** | `TestSEC14_NestedAirlockBypass` | — | `__AIRLOCK_ACTIVE=1` recursion bypass for nested toolchain invocations. | **PASSED** |
-| **SEC-15** | `TestSEC15_DNSTunnelingNeutralization` | **V-08** | In-process RFC 1035 UDP DNS forwarder returning `NXDOMAIN` on non-whitelisted domains. | **PASSED** |
-| **SEC-16** | `TestSEC16_AuditLogging` | — | Structured JSON-lines audit logging to `~/.airlock/audit.log` (0600 permissions). | **PASSED** |
-| **SEC-17** | `TestSEC17_ShimRecursionPrevention` | **V-14** | Transparent shell shims execution without recursion crashes. | **PASSED** |
-| **SEC-18** | `TestSEC18_ArgusStaticAnalysisHandoff` | — | Argus heuristic analysis and external `vetpkg` binary handoff. | **PASSED** |
-| **SEC-19** | `TestSEC19_TyposquattingInterception` | — | Pre-execution interception of known typosquats (`crossenv`, `reqeusts`). | **PASSED** |
-| **SEC-20** | `TestSEC20_RustBuildRsNetworkInterception`| — | Argus detection of outbound network sockets inside Rust `build.rs`. | **PASSED** |
-| **SEC-21** | `TestSEC21_SetupPyObfuscationInterception`| — | Interception of obfuscated base64 and reverse shell payloads in Python `setup.py`. | **PASSED** |
-| **SEC-22** | `TestSEC22_DeclarativeConfigDomainAllow` | — | Declarative `airlock.yaml` custom domain and wildcard allowlists. | **PASSED** |
-| **SEC-23** | `TestSEC23_DeclarativeConfigGuardrailDenial`| — | Guardrail rejection preventing `airlock.yaml` from overriding zero-trust boundaries. | **PASSED** |
-| **SEC-24** | `TestSEC24_InteractiveCapabilityGrantPrompt`| — | Dynamic interactive terminal prompts for unknown network domains. | **PASSED** |
-| **SEC-25** | `TestSEC25_ConfigInitAndValidation` | — | Policy scaffolding (`airlock init`) and validation against guardrails. | **PASSED** |
-| **SEC-26** | `TestSEC26_MCPSandboxConfinement` | — | Verifying MCP `airlock_exec` executes strictly inside zero-trust kernel sandbox. | **PASSED** |
-| **SEC-27** | `TestSEC27_MCPVetAndPolicyCheck` | — | MCP `airlock_vet` and `airlock_policy_check` tool threat detection and guardrails. | **PASSED** |
-| **SEC-28** | `TestSEC28_DoctorHealthyEnvironment` | — | `airlock doctor` diagnostic suite verifying platform, shims, and scratch health. | **PASSED** |
-| **SEC-29** | `TestSEC29_AuditQueryCapturesThreats` | — | `airlock audit` query engine indexing blocked egress, DNS tunneling, and CSV export. | **PASSED** |
-| **SEC-30** | `TestSEC30_MCPExtensions` | — | MCP protocol compliance for resources (`audit`, `policy`, `health`) and prompts. | **PASSED** |
-| **SEC-31** | `TestSEC31_ExtendedSupplyChainThreats` | — | Argus static analysis detection across Go, Ruby, and Obfuscated Shell pipelines. | **PASSED** |
-
----
-
-## 🧪 Verification & Testing
+## 🧪 Local Build & Verification
 
 ```bash
 # Run unit and integration tests
 make test
 
-# Run micro-benchmark harness
-go test -v -bench=. ./tests/benchmark_test.go
+# Run adversarial security verification suite
+make test-sec
 
-# Run full 31/31 Adversarial Security Suite
-go test -v ./tests/...
+# Run micro-benchmarks
+make bench
 
-# Cross-compile for all supported architectures (macOS arm64/amd64, Linux arm64/amd64)
-make cross-compile
+# Build binaries (bin/airlock and bin/airlock-mcp)
+make build
+
+# Cross-compile release packages for macOS and Linux
+make package
 ```
 
 ---
