@@ -72,6 +72,42 @@ flowchart TD
 
 ---
 
+## 🌐 The Supply Chain Defense Suite
+
+Airlock is the runtime confinement engine of the **Unified Supply Chain Defense Suite** created by [@bonjoski](https://github.com/bonjoski). Together, these three tools provide comprehensive defense-in-depth across the entire dependency lifecycle:
+
+```mermaid
+flowchart LR
+    Dev["Developer / AI Agent<br/>(Intent to install/run dependencies)"]
+
+    subgraph Tier1["Tier 1: Pre-Flight Gate"]
+        Argus["🔍 Project Argus (vetpkg)<br/>• Provenance Verification<br/>• Slopsquatting / Hallucination Detection<br/>• Heuristic Risk Scoring (<800ms)"]
+    end
+
+    subgraph Tier2["Tier 2: Lockfile Governance"]
+        Locksmith["🔐 Project Locksmith<br/>• Cryptographic Hash Pinning<br/>• Lockfile Tamper Protection<br/>• Dependency Tree Integrity & Policies"]
+    end
+
+    subgraph Tier3["Tier 3: Workstation Sandbox"]
+        Airlock["🛡️ Project Airlock (boxpkg)<br/>• Zero-VM Kernel Confinement (Seatbelt/bwrap)<br/>• Host & Workspace Secret Masking (~/.ssh, .env)<br/>• Ephemeral Proxy & DNS Interceptor<br/>• Dynamic Output Secret Redaction"]
+    end
+
+    Dev --> Tier1
+    Tier1 -->|Verified Safe| Tier2
+    Tier2 -->|Integrity Validated| Tier3
+    Tier3 --> Runtime["Safe Local Execution & Build"]
+```
+
+### The Three Defense Pillars
+
+| Tool | Focus & Purpose | Integration with Airlock |
+| :--- | :--- | :--- |
+| **[Argus](https://github.com/bonjoski/argus)** (`vetpkg`) | **Pre-Flight Provenance & Threat Vetting:** Queries upstream registries in real time to intercept hallucinated packages, typosquatting/slopsquatting, obfuscated `setup.py` scripts, and suspicious `build.rs` network logic before download. | Airlock embeds Argus rules directly into its pre-execution heuristic engine (`pkg/vet`, `--vet`, `--vetpkg`, and `airlock_vet` MCP tool). |
+| **[Locksmith](https://github.com/bonjoski/locksmith)** | **Lockfile Integrity & Governance:** Validates, cryptographically pins, and audits multi-ecosystem lockfiles (`package-lock.json`, `pnpm-lock.yaml`, `Cargo.lock`, `poetry.lock`), ensuring immutable dependency graphs and preventing unauthorized upstream drift. | Locksmith ensures that *only* cryptographically verified packages enter the pipeline, while Airlock guarantees that their installation hooks cannot escape the workstation boundary. |
+| **[Airlock](https://github.com/bonjoski/airlock)** (`boxpkg`) | **Zero-VM Runtime Process Confinement:** Provides ultra-fast (<8ms) OS kernel sandbox isolation, secret masking (`~/.ssh`, `.env`), proxy egress enforcement, and in-stream secret redaction during dependency execution. | The final, unbypassable execution boundary protecting developer workstations and autonomous AI agent loops. |
+
+---
+
 ## 🚀 Quickstart (Zero to Protected in 60 Seconds)
 
 ### Step 1: Install Airlock
