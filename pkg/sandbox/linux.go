@@ -81,15 +81,21 @@ func (l *LinuxEngine) CheckUserNamespaces() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, l.bwrapPath,
+	dryRunArgs := []string{
 		"--unshare-user",
 		"--unshare-pid",
-		"--ro-bind", "/usr", "/usr",
+		"--ro-bind-try", "/usr", "/usr",
+		"--ro-bind-try", "/lib", "/lib",
+		"--ro-bind-try", "/lib64", "/lib64",
+		"--ro-bind-try", "/bin", "/bin",
+		"--ro-bind-try", "/etc", "/etc",
 		"--proc", "/proc",
 		"--dev", "/dev",
 		"--",
 		"true",
-	)
+	}
+
+	cmd := exec.CommandContext(ctx, l.bwrapPath, dryRunArgs...)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%w: dry-run user namespace test failed: %w", ErrUsernsDisabled, err)
 	}
