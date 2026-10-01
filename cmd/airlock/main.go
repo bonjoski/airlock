@@ -57,6 +57,9 @@ func main() {
 	case "doctor":
 		handleDoctor(os.Args[2:])
 		os.Exit(0)
+	case "vet":
+		handleVet(os.Args[2:])
+		os.Exit(0)
 	case "audit":
 		handleAudit(os.Args[2:])
 		os.Exit(0)
@@ -83,6 +86,7 @@ func printUsage() {
 Usage:
   airlock run [flags] -- <command> [args...]
   airlock <command> [args...]
+  airlock vet [--strict] [--workspace <path>] [--json] [-- <command>]
   airlock init [--type <node|python|rust|go>]
   airlock config validate [--config <path>]
   airlock shim install [--target <dir>]

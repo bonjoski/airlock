@@ -39,6 +39,12 @@ jobs:
       - name: Verify Unit Tests
         run: go test -v ./...
 
+      - name: Run Argus Supply Chain Threat Inspection
+        run: make vet-supplychain
+
+      - name: Verify Sandboxed Dogfood Compilation
+        run: make build-sandboxed
+
       - name: Build & Package Binaries
         run: |
           VERSION="${{ github.ref_name }}"

@@ -321,7 +321,23 @@ airlock init --type node      # Options: node, python, rust, go, general
 airlock config validate --config ./airlock.yaml
 ```
 
-### 5. `airlock shim`
+### 5. `airlock vet` (Argus Threat Engine)
+Run Argus static supply chain threat detection across workspace manifests and source code:
+```bash
+# Scan current workspace
+airlock vet
+
+# Strict mode (fails on warnings/medium severity threats)
+airlock vet --strict
+
+# Output machine-readable JSON for CI/CD gates
+airlock vet --json --workspace /path/to/project
+
+# Vet command string before executing
+airlock vet -- npm install suspicious-package
+```
+
+### 6. `airlock shim`
 Manage transparent package manager shims:
 ```bash
 airlock shim install

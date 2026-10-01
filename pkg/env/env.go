@@ -24,6 +24,21 @@ var SafeEnvAllowlist = map[string]bool{
 	"SHELL":           true,
 	"CI":              true,
 	"DEBIAN_FRONTEND": true,
+	"SSL_CERT_FILE":   true,
+	"SSL_CERT_DIR":    true,
+	"GODEBUG":         true,
+	"GOROOT":          true,
+	"GOPATH":          true,
+	"GOCACHE":         true,
+	"GOMODCACHE":      true,
+	"GOPROXY":         true,
+	"GONOSUMDB":       true,
+	"GOPRIVATE":       true,
+	"CARGO_HOME":      true,
+	"RUSTUP_HOME":     true,
+	"NODE_PATH":       true,
+	"PYTHONPATH":      true,
+	"UV_CACHE_DIR":    true,
 }
 
 // Config specifies options for environment sanitization.
@@ -141,6 +156,24 @@ func (s *DefaultSanitizer) Sanitize(hostEnv []string) []string {
 	// Inject DNS interceptor address for tools that honour it
 	if s.config.DNSResolverAddress != "" {
 		result = append(result, "AIRLOCK_DNS="+s.config.DNSResolverAddress)
+	}
+
+	// Inject TLS root certificate fallbacks for sandboxed runtimes (e.g. macOS Seatbelt blocking securityd)
+	var hasSSLCert, hasGODEBUG bool
+	for _, r := range result {
+		if strings.HasPrefix(r, "SSL_CERT_FILE=") {
+			hasSSLCert = true
+		} else if strings.HasPrefix(r, "GODEBUG=") {
+			hasGODEBUG = true
+		}
+	}
+	if !hasSSLCert {
+		if _, err := os.Stat("/etc/ssl/cert.pem"); err == nil {
+			result = append(result, "SSL_CERT_FILE=/etc/ssl/cert.pem")
+		}
+	}
+	if !hasGODEBUG {
+		result = append(result, "GODEBUG=x509usefallbackroots=1")
 	}
 
 	// Export nesting sentinel to prevent recursive sandboxing crashes in agent loops

@@ -21,7 +21,7 @@ GOLANGCI_LINT := $(shell which golangci-lint 2>/dev/null)
 GOVULNCHECK := $(shell which govulncheck 2>/dev/null)
 
 .PHONY: all
-all: fmt vet lint vulncheck test build ## Run format, vet, lint, vulncheck, test, and build
+all: fmt vet vet-supplychain lint vulncheck test build build-sandboxed ## Run all checks, Argus vetting, tests, and sandboxed builds
 
 .PHONY: help
 help: ## Display this help screen
@@ -33,6 +33,11 @@ help: ## Display this help screen
 	@echo "Targets:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
+.PHONY: vet-supplychain
+vet-supplychain: ## Run Argus static supply chain threat analysis on this repository
+	@echo "==> Running Argus supply chain inspection..."
+	go run $(MAIN_PKG) vet --strict
+
 .PHONY: build
 build: ## Build the optimized release binary in ./bin/airlock and bin/airlock-mcp
 	@mkdir -p $(BIN_DIR)
@@ -42,6 +47,13 @@ build: ## Build the optimized release binary in ./bin/airlock and bin/airlock-mc
 	@echo "==> Building airlock-mcp $(VERSION)..."
 	go build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/airlock-mcp ./cmd/airlock-mcp
 	@echo "==> Binaries built: $(BIN_DIR)/$(BINARY_NAME), $(BIN_DIR)/airlock-mcp"
+
+.PHONY: build-sandboxed
+build-sandboxed: build ## Build release artifacts inside Airlock's own zero-trust sandbox (dogfooding)
+	@echo "==> Verifying sandboxed build execution with airlock..."
+	./$(BIN_DIR)/$(BINARY_NAME) run -- go build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY_NAME)-sandboxed $(MAIN_PKG)
+	@rm -f $(BIN_DIR)/$(BINARY_NAME)-sandboxed
+	@echo "==> Sandboxed dogfood build verified successfully"
 
 .PHONY: build-debug
 build-debug: ## Build unoptimized debug binary with symbols

@@ -1,0 +1,46 @@
+# Airlock Declarative Security Policy for bonjoski/airlock
+# Schema: https://github.com/bonjoski/airlock
+version: "1.0"
+mode: standard
+
+network:
+  allow_domains:
+    - "proxy.golang.org"
+    - "sum.golang.org"
+    - "github.com"
+    - "raw.githubusercontent.com"
+    - "objects.githubusercontent.com"
+    - "pkg.go.dev"
+
+env:
+  allow:
+    - "CGO_ENABLED"
+    - "GOOS"
+    - "GOARCH"
+    - "GOPATH"
+    - "GOROOT"
+    - "GOCACHE"
+    - "GOPROXY"
+    - "GONOSUMDB"
+    - "GOPRIVATE"
+    - "PATH"
+    - "HOME"
+    - "TMPDIR"
+
+filesystem:
+  allow_read:
+    - "."
+  allow_write:
+    - "bin"
+    - "dist"
+    - "coverage.out"
+    - "coverage.html"
+
+vetting:
+  enable: true
+  strict: true
+  ignored_rules: []
+
+interactive:
+  prompt_on_unknown_domain: true
+  prompt_timeout_sec: 15

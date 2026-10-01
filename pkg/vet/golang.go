@@ -46,7 +46,7 @@ func InspectGoWorkspace(workspaceRoot string) []Finding {
 			return nil
 		}
 
-		if strings.HasSuffix(d.Name(), ".go") {
+		if strings.HasSuffix(d.Name(), ".go") && !strings.HasSuffix(d.Name(), "_test.go") {
 			if fFindings, fErr := inspectGoSourceFile(path, workspaceRoot); fErr == nil {
 				findings = append(findings, fFindings...)
 			}

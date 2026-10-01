@@ -33,6 +33,9 @@ jobs:
       - name: Go Vet Analysis
         run: make vet
 
+      - name: Run Argus Supply Chain Threat Inspection
+        run: make vet-supplychain
+
       - name: Run govulncheck
         run: make vulncheck
 
@@ -57,6 +60,9 @@ jobs:
 
       - name: Run Tests with Race Detector & Coverage
         run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Run Sandboxed Dogfood Compilation (Linux Bubblewrap)
+        run: make build-sandboxed
 
       - name: Upload Linux Coverage Artifact
         uses: actions/upload-artifact@v4
@@ -87,6 +93,9 @@ jobs:
 
       - name: Run Live macOS Seatbelt Adversarial Battery
         run: make test-sec
+
+      - name: Run Sandboxed Dogfood Compilation (macOS Seatbelt)
+        run: make build-sandboxed
 
   cross-compile:
     name: Cross-Compilation & Packaging Verification
