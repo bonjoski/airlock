@@ -162,7 +162,9 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 	// Ephemeral Scratch Space (V-11: 0700 private directories)
 	args = append(args,
 		"--bind", sc.TmpDir(), "/tmp",
+		"--dir", sc.HomeDir(),
 		"--bind", sc.HomeDir(), sc.HomeDir(),
+		"--dir", sc.CacheStagingDir(),
 		"--bind", sc.CacheStagingDir(), sc.CacheStagingDir(),
 		"--setenv", "HOME", sc.HomeDir(),
 		"--setenv", "TMPDIR", "/tmp",
@@ -170,6 +172,7 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 
 	// Workspace Root Mount (Read-Write for builds and installs)
 	args = append(args,
+		"--dir", l.opts.WorkspaceRoot,
 		"--bind", l.opts.WorkspaceRoot, l.opts.WorkspaceRoot,
 		"--chdir", l.opts.WorkspaceRoot,
 	)
@@ -191,7 +194,7 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 	if l.cacheMgr != nil && userHome != "" {
 		cacheMounts := l.cacheMgr.GetHostCacheMounts(userHome)
 		for _, m := range cacheMounts {
-			args = append(args, "--ro-bind-try", m.HostPath, m.HostPath)
+			args = append(args, "--dir", m.HostPath, "--ro-bind-try", m.HostPath, m.HostPath)
 		}
 	}
 
@@ -201,7 +204,7 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 		if strings.HasPrefix(cleaned, "~/") && userHome != "" {
 			cleaned = filepath.Join(userHome, cleaned[2:])
 		}
-		args = append(args, "--ro-bind-try", cleaned, cleaned)
+		args = append(args, "--dir", cleaned, "--ro-bind-try", cleaned, cleaned)
 	}
 
 	// Extra allowed write paths
@@ -210,7 +213,7 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 		if strings.HasPrefix(cleaned, "~/") && userHome != "" {
 			cleaned = filepath.Join(userHome, cleaned[2:])
 		}
-		args = append(args, "--bind-try", cleaned, cleaned)
+		args = append(args, "--dir", cleaned, "--bind-try", cleaned, cleaned)
 	}
 
 	// Seccomp-BPF Syscall Filter Attachment (Target 2 / V-05, V-09)
