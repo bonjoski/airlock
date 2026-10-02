@@ -201,8 +201,18 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 	// Extra allowed read paths
 	for _, p := range l.opts.ExtraAllowRead {
 		cleaned := strings.TrimSpace(p)
+		if cleaned == "" {
+			continue
+		}
 		if strings.HasPrefix(cleaned, "~/") && userHome != "" {
 			cleaned = filepath.Join(userHome, cleaned[2:])
+		} else if !filepath.IsAbs(cleaned) {
+			cleaned = filepath.Join(l.opts.WorkspaceRoot, cleaned)
+		}
+		// Skip if already within workspace root (which is already mounted)
+		rel, err := filepath.Rel(l.opts.WorkspaceRoot, cleaned)
+		if err == nil && !strings.HasPrefix(rel, "..") && rel != ".." {
+			continue
 		}
 		args = append(args, "--dir", cleaned, "--ro-bind-try", cleaned, cleaned)
 	}
@@ -210,8 +220,18 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 	// Extra allowed write paths
 	for _, p := range l.opts.ExtraAllowWrite {
 		cleaned := strings.TrimSpace(p)
+		if cleaned == "" {
+			continue
+		}
 		if strings.HasPrefix(cleaned, "~/") && userHome != "" {
 			cleaned = filepath.Join(userHome, cleaned[2:])
+		} else if !filepath.IsAbs(cleaned) {
+			cleaned = filepath.Join(l.opts.WorkspaceRoot, cleaned)
+		}
+		// Skip if already within workspace root (which is already mounted read-write)
+		rel, err := filepath.Rel(l.opts.WorkspaceRoot, cleaned)
+		if err == nil && !strings.HasPrefix(rel, "..") && rel != ".." {
+			continue
 		}
 		args = append(args, "--dir", cleaned, "--bind-try", cleaned, cleaned)
 	}
