@@ -65,6 +65,11 @@ func NewLinuxEngine(opts Options) (*LinuxEngine, error) {
 	return eng, nil
 }
 
+// SetOptionsForTest sets the engine options for unit testing purposes.
+func (l *LinuxEngine) SetOptionsForTest(opts Options) {
+	l.opts = opts
+}
+
 // CheckUserNamespaces inspects host configuration to ensure unprivileged user namespaces
 // and process isolation primitives are functional (V-07: prevents unconfined fallback).
 func (l *LinuxEngine) CheckUserNamespaces() error {
@@ -142,8 +147,8 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 		"--unshare-uts",
 	}
 
-	// Mandatory Network Namespace Detachment (V-09: isolates abstract Unix sockets @X11, @dbus)
-	if l.opts.Airgap || !l.opts.AllowDirectNet {
+	// Network Namespace Detachment (V-09: Isolates network in Airgap mode)
+	if l.opts.Airgap {
 		args = append(args, "--unshare-net")
 	}
 

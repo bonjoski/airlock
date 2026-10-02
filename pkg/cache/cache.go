@@ -79,6 +79,18 @@ func DefaultToolMappings() []ToolCacheMapping {
 			HostRelPath: filepath.Join(".cargo", "git"),
 			EnvVar:      "",
 		},
+		{
+			Name:        "go-mod",
+			Subdir:      "go-mod",
+			HostRelPath: filepath.Join("go", "pkg", "mod"),
+			EnvVar:      "GOMODCACHE",
+		},
+		{
+			Name:        "go-build",
+			Subdir:      "go-build",
+			HostRelPath: filepath.Join(".cache", "go-build"),
+			EnvVar:      "GOCACHE",
+		},
 	}
 }
 

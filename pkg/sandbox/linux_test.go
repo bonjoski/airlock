@@ -105,7 +105,7 @@ func TestLinuxEngine_BuildBwrapArgs(t *testing.T) {
 
 	opts := Options{
 		WorkspaceRoot:  workspace,
-		Airgap:         false,
+		Airgap:         true,
 		AllowDirectNet: false,
 	}
 

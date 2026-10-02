@@ -348,6 +348,7 @@ func TestSEC10_AbstractSocketNetnsDetachment(t *testing.T) {
 	}()
 
 	eng := &sandbox.LinuxEngine{}
+	eng.SetOptionsForTest(sandbox.Options{Airgap: true})
 	args, err := eng.BuildBwrapArgs(sc, nil, tempDir)
 	if err != nil {
 		t.Fatalf("BuildBwrapArgs failed: %v", err)
