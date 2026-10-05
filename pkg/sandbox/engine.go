@@ -67,6 +67,8 @@ func NewEngine(opts Options) (Engine, error) {
 		return NewMacOSEngine(opts)
 	case "linux":
 		return NewLinuxEngine(opts)
+	case "windows":
+		return NewWindowsEngine(opts)
 	default:
 		return nil, fmt.Errorf("sandbox: operating system %s is not supported: %w", runtime.GOOS, errors.ErrUnsupported)
 	}
@@ -96,7 +98,7 @@ func FindWorkspaceRoot(startDir string) string {
 		}
 
 		parent := filepath.Dir(curr)
-		if parent == curr || parent == "." || parent == "/" {
+		if parent == curr || parent == "." || parent == "/" || parent == "\\" || parent == filepath.VolumeName(parent)+"\\" || parent == filepath.VolumeName(parent) {
 			break
 		}
 		curr = parent

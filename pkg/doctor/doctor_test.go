@@ -135,7 +135,7 @@ func TestDoctor_CheckPlatformSandbox_Linux(t *testing.T) {
 	}
 }
 
-func TestDoctor_CheckPlatformSandbox_UnsupportedOS(t *testing.T) {
+func TestDoctor_CheckPlatformSandbox_Windows(t *testing.T) {
 	ctx := context.Background()
 	tempDir := t.TempDir()
 
@@ -148,14 +148,38 @@ func TestDoctor_CheckPlatformSandbox_UnsupportedOS(t *testing.T) {
 
 	results := CheckPlatformSandbox(ctx, opts)
 	if len(results) == 0 {
+		t.Fatal("Expected results for Windows platform")
+	}
+
+	if results[0].Status != StatusPass {
+		t.Errorf("Expected StatusPass for Windows, got %s", results[0].Status)
+	}
+	if !strings.Contains(results[0].Title, "Windows Job Object") {
+		t.Errorf("Expected title to mention Windows Job Object, got %s", results[0].Title)
+	}
+}
+
+func TestDoctor_CheckPlatformSandbox_UnsupportedOS(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+
+	opts := Options{
+		WorkspaceRoot: tempDir,
+		HomeDir:       tempDir,
+		GOOS:          "solaris",
+		GOARCH:        "amd64",
+	}
+
+	results := CheckPlatformSandbox(ctx, opts)
+	if len(results) == 0 {
 		t.Fatal("Expected results for unsupported OS")
 	}
 
 	if results[0].Status != StatusFail {
 		t.Errorf("Expected StatusFail for unsupported OS, got %s", results[0].Status)
 	}
-	if !strings.Contains(results[0].Details, "windows") {
-		t.Errorf("Expected details to mention windows, got %s", results[0].Details)
+	if !strings.Contains(results[0].Details, "solaris") {
+		t.Errorf("Expected details to mention solaris, got %s", results[0].Details)
 	}
 }
 

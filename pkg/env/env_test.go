@@ -174,3 +174,52 @@ func TestSanitizer_DenyEnv(t *testing.T) {
 		t.Errorf("Expected CUSTOM_VAR to be preserved")
 	}
 }
+
+func TestSanitizer_WindowsEnvironment(t *testing.T) {
+	cfg := Config{
+		VirtualHome: `C:\Users\victim\AppData\Local\Temp\airlock-scratch\home`,
+		ScratchDir:  `C:\Users\victim\AppData\Local\Temp\airlock-scratch\tmp`,
+	}
+	sanitizer := NewSanitizer(cfg)
+	hostEnv := []string{
+		`SystemRoot=C:\Windows`,
+		`windir=C:\Windows`,
+		`PATHEXT=.COM;.EXE;.BAT;.CMD`,
+		`COMSPEC=C:\Windows\system32\cmd.exe`,
+		`AWS_SECRET_ACCESS_KEY=supersecret`,
+		`GITHUB_TOKEN=ghp_token`,
+		`TEMP=C:\Users\victim\AppData\Local\Temp`,
+		`USERPROFILE=C:\Users\victim`,
+	}
+
+	sanitized := sanitizer.Sanitize(hostEnv)
+	envMap := make(map[string]string)
+	for _, entry := range sanitized {
+		parts := strings.SplitN(entry, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	// Windows system variables must be preserved
+	if envMap["SystemRoot"] != `C:\Windows` {
+		t.Errorf("Expected SystemRoot to be preserved, got %q", envMap["SystemRoot"])
+	}
+	if envMap["windir"] != `C:\Windows` {
+		t.Errorf("Expected windir to be preserved, got %q", envMap["windir"])
+	}
+	if envMap["PATHEXT"] != `.COM;.EXE;.BAT;.CMD` {
+		t.Errorf("Expected PATHEXT to be preserved, got %q", envMap["PATHEXT"])
+	}
+	if envMap["COMSPEC"] != `C:\Windows\system32\cmd.exe` {
+		t.Errorf("Expected COMSPEC to be preserved, got %q", envMap["COMSPEC"])
+	}
+
+	// Secrets must be dropped
+	if _, exists := envMap["AWS_SECRET_ACCESS_KEY"]; exists {
+		t.Errorf("Security leak: AWS_SECRET_ACCESS_KEY preserved on Windows")
+	}
+	if _, exists := envMap["GITHUB_TOKEN"]; exists {
+		t.Errorf("Security leak: GITHUB_TOKEN preserved on Windows")
+	}
+}

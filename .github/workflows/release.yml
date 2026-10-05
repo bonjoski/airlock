@@ -65,6 +65,7 @@ jobs:
         with:
           files: |
             dist/*.tar.gz
+            dist/*.zip
             dist/checksums.txt
             dist/checksums.txt.bundle
           generate_release_notes: true

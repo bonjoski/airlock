@@ -5,10 +5,11 @@ package env
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
-// SafeEnvAllowlist defines standard POSIX environment variables safe to inherit.
+// SafeEnvAllowlist defines standard POSIX and Windows environment variables safe to inherit.
 // Any environment variable not in this list or explicitly preserved via KeepEnv is dropped.
 var SafeEnvAllowlist = map[string]bool{
 	"PATH":            true,
@@ -39,6 +40,32 @@ var SafeEnvAllowlist = map[string]bool{
 	"NODE_PATH":       true,
 	"PYTHONPATH":      true,
 	"UV_CACHE_DIR":    true,
+
+	// Windows NT System Environment Variables
+	"SYSTEMROOT":              true,
+	"SYSTEMDRIVE":             true,
+	"WINDIR":                  true,
+	"PATHEXT":                 true,
+	"COMSPEC":                 true,
+	"TEMP":                    true,
+	"TMP":                     true,
+	"USERPROFILE":             true,
+	"LOCALAPPDATA":            true,
+	"APPDATA":                 true,
+	"ALLUSERSPROFILE":         true,
+	"PROGRAMDATA":             true,
+	"PROGRAMFILES":            true,
+	"PROGRAMFILES(X86)":       true,
+	"COMMONPROGRAMFILES":      true,
+	"COMMONPROGRAMFILES(X86)": true,
+	"NUMBER_OF_PROCESSORS":    true,
+	"PROCESSOR_ARCHITECTURE":  true,
+	"PROCESSOR_IDENTIFIER":    true,
+	"PROCESSOR_LEVEL":         true,
+	"PROCESSOR_REVISION":      true,
+	"OS":                      true,
+	"HOMEDRIVE":               true,
+	"HOMEPATH":                true,
 }
 
 // Config specifies options for environment sanitization.
@@ -92,30 +119,31 @@ func (s *DefaultSanitizer) Sanitize(hostEnv []string) []string {
 		}
 		key := entry[:idx]
 		val := entry[idx+1:]
+		keyUpper := strings.ToUpper(key)
 
 		// Explicit deny list takes absolute priority
-		if denySet[key] {
+		if denySet[key] || (runtime.GOOS == "windows" && denySet[keyUpper]) {
 			continue
 		}
 
 		// Explicit keep-env overrides take precedence
-		if keepSet[key] {
+		if keepSet[key] || (runtime.GOOS == "windows" && keepSet[keyUpper]) {
 			result = append(result, entry)
 			continue
 		}
 
 		// Drop variables not on the allowlist (e.g. AWS_*, DATABASE_URL, GITHUB_TOKEN)
-		if !SafeEnvAllowlist[key] {
+		if !SafeEnvAllowlist[key] && !SafeEnvAllowlist[keyUpper] {
 			continue
 		}
 
 		// Sanitize PATH to eliminate relative trojan binaries
-		if key == "PATH" {
+		if keyUpper == "PATH" {
 			val = SanitizePath(val)
 		}
 
-		// HOME and TMPDIR are overridden with virtual paths below
-		if key == "HOME" || key == "TMPDIR" {
+		// HOME, USERPROFILE, TMPDIR, TEMP, TMP are overridden with virtual paths below
+		if keyUpper == "HOME" || keyUpper == "TMPDIR" || keyUpper == "USERPROFILE" || keyUpper == "TEMP" || keyUpper == "TMP" {
 			continue
 		}
 
@@ -125,9 +153,15 @@ func (s *DefaultSanitizer) Sanitize(hostEnv []string) []string {
 	// Inject virtual paths
 	if s.config.VirtualHome != "" {
 		result = append(result, "HOME="+s.config.VirtualHome)
+		if runtime.GOOS == "windows" {
+			result = append(result, "USERPROFILE="+s.config.VirtualHome)
+		}
 	}
 	if s.config.ScratchDir != "" {
 		result = append(result, "TMPDIR="+s.config.ScratchDir)
+		if runtime.GOOS == "windows" {
+			result = append(result, "TEMP="+s.config.ScratchDir, "TMP="+s.config.ScratchDir)
+		}
 	}
 
 	// Inject cache redirects to ephemeral staging layer (V-12)
@@ -200,7 +234,11 @@ func SanitizePath(pathVar string) string {
 		}
 
 		clean := filepath.Clean(entry)
-		if clean == "/" {
+		if clean == "/" || clean == "\\" || clean == "." {
+			continue
+		}
+		// On Windows, single drive root like "C:\"
+		if len(clean) <= 3 && strings.HasSuffix(clean, ":\\") {
 			continue
 		}
 

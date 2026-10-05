@@ -79,11 +79,17 @@ cross-compile: ## Cross-compile release binaries for Darwin and Linux (amd64, ar
 	@echo "    -> linux/amd64"
 	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)_linux_amd64 $(MAIN_PKG)
 	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/airlock-mcp_linux_amd64 ./cmd/airlock-mcp
+	@echo "    -> windows/amd64"
+	@CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)_windows_amd64.exe $(MAIN_PKG)
+	@CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/airlock-mcp_windows_amd64.exe ./cmd/airlock-mcp
+	@echo "    -> windows/arm64"
+	@CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/$(BINARY_NAME)_windows_arm64.exe $(MAIN_PKG)
+	@CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags="$(LDFLAGS)" -o $(DIST_DIR)/airlock-mcp_windows_arm64.exe ./cmd/airlock-mcp
 	@echo "==> Cross-compilation complete in $(DIST_DIR)/"
 
 .PHONY: package
-package: cross-compile ## Package release tarballs and generate sha256 checksums in dist/
-	@echo "==> Packaging release tarballs..."
+package: cross-compile ## Package release archives and generate sha256 checksums in dist/
+	@echo "==> Packaging release archives..."
 	@for target in darwin_arm64 darwin_amd64 linux_arm64 linux_amd64; do \
 		tar_dir=$(DIST_DIR)/pkg_$$target; \
 		rm -rf $$tar_dir; \
@@ -96,10 +102,22 @@ package: cross-compile ## Package release tarballs and generate sha256 checksums
 		tar -czf $(DIST_DIR)/$(BINARY_NAME)_$${target}.tar.gz -C $$tar_dir .; \
 		rm -rf $$tar_dir; \
 	done
+	@for target in windows_amd64 windows_arm64; do \
+		zip_dir=$(DIST_DIR)/pkg_$$target; \
+		rm -rf $$zip_dir; \
+		mkdir -p $$zip_dir; \
+		cp $(DIST_DIR)/$(BINARY_NAME)_$${target}.exe $$zip_dir/$(BINARY_NAME).exe; \
+		cp $(DIST_DIR)/airlock-mcp_$${target}.exe $$zip_dir/airlock-mcp.exe; \
+		cp $(DIST_DIR)/$(BINARY_NAME)_$${target}.exe $$zip_dir/$(LEGACY_ALIAS).exe; \
+		[ -f README.md ] && cp README.md $$zip_dir/ || true; \
+		[ -f LICENSE ] && cp LICENSE $$zip_dir/ || true; \
+		(cd $$zip_dir && zip -q -r ../$(BINARY_NAME)_$${target}.zip .); \
+		rm -rf $$zip_dir; \
+	done
 	@echo "==> Generating SHA256 checksums..."
-	@(cd $(DIST_DIR) && shasum -a 256 $(BINARY_NAME)_*.tar.gz > checksums.txt)
+	@(cd $(DIST_DIR) && shasum -a 256 $(BINARY_NAME)_*.tar.gz $(BINARY_NAME)_*.zip > checksums.txt)
 	@echo "==> Packages ready in $(DIST_DIR)/:"
-	@ls -lh $(DIST_DIR)/$(BINARY_NAME)_*.tar.gz $(DIST_DIR)/checksums.txt
+	@ls -lh $(DIST_DIR)/$(BINARY_NAME)_*.tar.gz $(DIST_DIR)/$(BINARY_NAME)_*.zip $(DIST_DIR)/checksums.txt
 
 .PHONY: test
 test: ## Run all unit and integration tests

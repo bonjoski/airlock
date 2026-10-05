@@ -98,9 +98,25 @@ jobs:
       - name: Run Sandboxed Dogfood Compilation (macOS Seatbelt)
         run: make build-sandboxed
 
+  test-windows:
+    name: Windows Compatibility & Tests (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Run Windows Tests
+        run: go test -v ./...
+
   cross-compile:
     name: Cross-Compilation & Packaging Verification
-    needs: [quality-and-security, test-linux, test-macos]
+    needs: [quality-and-security, test-linux, test-macos, test-windows]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -123,5 +139,6 @@ jobs:
           name: airlock-binaries
           path: |
             dist/*.tar.gz
+            dist/*.zip
             dist/checksums.txt
           retention-days: 7

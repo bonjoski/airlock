@@ -298,6 +298,15 @@ func CheckPlatformSandbox(ctx context.Context, opts Options) []CheckResult {
 			})
 		}
 
+	case "windows":
+		results = append(results, CheckResult{
+			ID:       "sandbox-windows-jobobject",
+			Category: "Platform Sandbox Primitives",
+			Status:   StatusPass,
+			Title:    "Windows Job Object process confinement",
+			Details:  fmt.Sprintf("Windows NT process isolation and Job Object lifecycle limits supported for %s", opts.GOARCH),
+		})
+
 	default:
 		results = append(results, CheckResult{
 			ID:             "sandbox-platform-support",
@@ -305,7 +314,7 @@ func CheckPlatformSandbox(ctx context.Context, opts Options) []CheckResult {
 			Status:         StatusFail,
 			Title:          "Operating system platform support",
 			Details:        fmt.Sprintf("Unsupported operating system %q", opts.GOOS),
-			Recommendation: "Airlock requires macOS (Seatbelt) or Linux (Bubblewrap + Seccomp).",
+			Recommendation: "Airlock requires macOS (Seatbelt), Linux (Bubblewrap + Seccomp), or Windows (Job Objects).",
 		})
 	}
 

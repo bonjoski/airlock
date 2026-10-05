@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -70,6 +71,16 @@ func (m *DefaultManager) Install(targetDir string) ([]string, error) {
 			return installed, fmt.Errorf("shim: failed to write %s: %w", shimPath, err)
 		}
 		installed = append(installed, shimPath)
+
+		// On Windows, additionally generate .cmd batch wrapper
+		if runtime.GOOS == "windows" {
+			cmdPath := filepath.Join(targetDir, tool+".cmd")
+			cmdContent := generateWindowsCmdScript(tool)
+			if err := os.WriteFile(cmdPath, []byte(cmdContent), 0755); err != nil {
+				return installed, fmt.Errorf("shim: failed to write %s: %w", cmdPath, err)
+			}
+			installed = append(installed, cmdPath)
+		}
 	}
 
 	return installed, nil
@@ -90,6 +101,9 @@ func (m *DefaultManager) Uninstall(targetDir string) error {
 		if err := os.Remove(shimPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("shim: failed to remove %s: %w", shimPath, err)
 		}
+
+		cmdPath := filepath.Join(targetDir, tool+".cmd")
+		_ = os.Remove(cmdPath)
 	}
 
 	return nil
@@ -115,6 +129,10 @@ func (m *DefaultManager) List(targetDir string) ([]ShimStatus, error) {
 
 		if info, err := os.Stat(shimPath); err == nil && !info.IsDir() {
 			status.Installed = true
+		} else if runtime.GOOS == "windows" {
+			if info, err := os.Stat(filepath.Join(targetDir, tool+".cmd")); err == nil && !info.IsDir() {
+				status.Installed = true
+			}
 		}
 
 		// Locate host executable outside of shim directory
@@ -138,9 +156,20 @@ func findHostBinary(tool string, shimDir string) string {
 		if cleanEntry == cleanShimDir {
 			continue
 		}
-		candidate := filepath.Join(cleanEntry, tool)
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() && (info.Mode()&0111 != 0) {
-			return candidate
+		candidates := []string{filepath.Join(cleanEntry, tool)}
+		if runtime.GOOS == "windows" {
+			candidates = append(candidates,
+				filepath.Join(cleanEntry, tool+".cmd"),
+				filepath.Join(cleanEntry, tool+".exe"),
+				filepath.Join(cleanEntry, tool+".bat"),
+			)
+		}
+		for _, candidate := range candidates {
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				if runtime.GOOS == "windows" || (info.Mode()&0111 != 0) {
+					return candidate
+				}
+			}
 		}
 	}
 
@@ -177,5 +206,30 @@ func generateShimScript(tool string) string {
 	sb.WriteString("fi\n\n")
 	sb.WriteString("# 2. Forward execution to airlock supervisor\n")
 	sb.WriteString("exec airlock \"$TOOL\" \"$@\"\n")
+	return sb.String()
+}
+
+func generateWindowsCmdScript(tool string) string {
+	var sb strings.Builder
+	sb.WriteString("@echo off\n")
+	sb.WriteString(fmt.Sprintf("rem Airlock Transparent Toolchain Shim for %s\n", tool))
+	sb.WriteString("rem Copyright 2026 Ben Skolmoski - MIT License\n\n")
+	sb.WriteString("setlocal\n")
+	sb.WriteString("if \"%__AIRLOCK_ACTIVE%\"==\"1\" (\n")
+	sb.WriteString("    set \"CURRENT_DIR=%~dp0\"\n")
+	sb.WriteString(fmt.Sprintf("    for %%%%F in (%s.cmd %s.exe %s.bat %s) do (\n", tool, tool, tool, tool))
+	sb.WriteString("        for /f \"delims=\" %%%%I in ('where %%%%F 2^>nul') do (\n")
+	sb.WriteString("            if not \"%%%%~dpI\"==\"%CURRENT_DIR%\" (\n")
+	sb.WriteString("                endlocal\n")
+	sb.WriteString("                \"%%%%I\" %*\n")
+	sb.WriteString("                exit /b %errorlevel%\n")
+	sb.WriteString("            )\n")
+	sb.WriteString("        )\n")
+	sb.WriteString("    )\n")
+	sb.WriteString(fmt.Sprintf("    echo airlock shim: unable to locate host %s outside of %%CURRENT_DIR%% >&2\n", tool))
+	sb.WriteString("    exit /b 127\n")
+	sb.WriteString(")\n")
+	sb.WriteString("endlocal\n\n")
+	sb.WriteString(fmt.Sprintf("airlock.exe run -- %s %%*\n", tool))
 	return sb.String()
 }

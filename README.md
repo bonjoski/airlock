@@ -1,7 +1,7 @@
 # Airlock 🛡️
 
 > **Minimalist Zero-Trust Workstation Sandbox for Untrusted Package Installs & Autonomous AI Coding Agents**  
-> *Target Startup Overhead: <15ms (Measured: ~7.9ms) | Footprint: Zero-VM / Zero-Daemon | Platform: macOS & Linux*  
+> *Target Startup Overhead: <15ms (Measured: ~7.9ms) | Footprint: Zero-VM / Zero-Daemon | Platform: macOS, Linux & Windows*  
 
 [![CI](https://github.com/bonjoski/airlock/actions/workflows/ci.yml/badge.svg)](https://github.com/bonjoski/airlock/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/bonjoski/airlock?color=blue)](https://github.com/bonjoski/airlock/releases)
@@ -49,11 +49,11 @@ flowchart TD
     end
 
     subgraph DefenseLayer["Airlock Zero-Trust Protection Layer"]
-        PTY["1. Dedicated PTY Allocation<br/>(Neutralizes TIOCSTI terminal injection)"]
-        ENV["2. POSIX Environment Scrubbing<br/>(Drops cloud tokens, AWS/GCP keys, DB URIs)"]
+        PTY["1. Dedicated PTY & Console Detection<br/>(Neutralizes TIOCSTI terminal injection)"]
+        ENV["2. Zero-Trust Environment Scrubbing<br/>(Drops cloud tokens, AWS/GCP keys, DB URIs)"]
         PROXY["3. Ephemeral Forward Proxy & DNS Interceptor<br/>(RFC 1035 UDP forwarder; NXDOMAIN on DNS tunnels)"]
         CACHE["4. Read-Only Host Package Caches<br/>(~/.npm, ~/.cache/pip, ~/.cargo + staging write-layer)"]
-        SCRATCH["5. Ephemeral 0700 Scratch Space<br/>(Cryptographic mkdtemp /tmp/boxpkg-XXXXXXXXXXXX)"]
+        SCRATCH["5. Ephemeral Scratch Space<br/>(Private 0700 temporary directories)"]
         ARGUS["6. Argus Pre-Execution Static Vetting<br/>(Typosquats, obfuscated setup.py, build.rs backdoors)"]
         REDACT["7. Dynamic In-Stream Output Secret Redactor<br/>(Masks leaked API keys/tokens before stdout/LLM response)"]
     end
@@ -61,6 +61,7 @@ flowchart TD
     subgraph OSKernel["Kernel Sandbox Engine"]
         DARWIN["macOS Seatbelt Engine (sandbox-exec)<br/>• Absolute {{.UserHome}} Path Interpolation<br/>• Deny Mach: Keychain, LaunchServices, Pasteboard, TCC<br/>• Deny /private/tmp launchd ssh-agent listeners<br/>• Deny .git write & .env* read in workspace<br/>• Kernel TCP egress strictly to 127.0.0.1:ProxyPort"]
         LINUX["Linux Engine (bwrap + Seccomp-BPF)<br/>• Unprivileged CLONE_NEWUSER & CLONE_NEWNET<br/>• Seccomp: Block io_uring, ptrace, TIOCSTI, bpf<br/>• Abstract Unix domain socket isolation (@X11, @dbus)"]
+        WINDOWS["Windows Engine (Job Objects & Process Confinement)<br/>• Kill-on-close lifecycle guarantees<br/>• Active process limit fork-bomb prevention<br/>• Low integrity token isolation & proxy boundary"]
     end
 
     User --> CLI
@@ -127,6 +128,9 @@ brew install bonjoski/airlock/airlock
 go install github.com/bonjoski/airlock/cmd/airlock@latest
 go install github.com/bonjoski/airlock/cmd/airlock-mcp@latest
 ```
+
+#### Option D: Windows Release Zip (Windows amd64 & arm64)
+Download the latest `airlock_windows_amd64.zip` or `airlock_windows_arm64.zip` from [GitHub Releases](https://github.com/bonjoski/airlock/releases), extract `airlock.exe` and `airlock-mcp.exe`, and add to your User `PATH`.
 
 ---
 
