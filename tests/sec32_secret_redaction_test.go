@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -68,7 +69,11 @@ func TestSEC32_SecretRedaction(t *testing.T) {
 		defer cancel()
 
 		fakeToken := "gh" + "p_" + strings.Repeat("9876", 9)
-		exitCode, err := engine.Execute(ctx, []string{"echo", "leaked token: " + fakeToken})
+		echoCmd := []string{"echo", "leaked token: " + fakeToken}
+		if runtime.GOOS == "windows" {
+			echoCmd = []string{"cmd.exe", "/c", "echo leaked token: " + fakeToken}
+		}
+		exitCode, err := engine.Execute(ctx, echoCmd)
 		_ = redactingWriter.Close()
 
 		if err != nil {
@@ -92,8 +97,12 @@ func TestSEC32_SecretRedaction(t *testing.T) {
 		toolHandler := mcp.NewDefaultToolHandler()
 
 		fakeOpenAI := "sk-proj-" + strings.Repeat("1234567890ab", 4)
+		execCmd := "echo export OPENAI_API_KEY=" + fakeOpenAI
+		if runtime.GOOS == "windows" {
+			execCmd = "cmd.exe /c echo export OPENAI_API_KEY=" + fakeOpenAI
+		}
 		execPayload, _ := json.Marshal(map[string]interface{}{
-			"command":   "echo export OPENAI_API_KEY=" + fakeOpenAI,
+			"command":   execCmd,
 			"workspace": tmpDir,
 			"airgap":    true,
 		})
@@ -133,6 +142,16 @@ func TestSEC32_SecretRedaction(t *testing.T) {
 			"echo \"AWS_ACCESS_KEY_ID=" + dummyAWSKey + "\"\n" +
 			"echo \"" + dummyGCP + "\"\n" +
 			"echo \"ANTHROPIC_API_KEY=" + dummyAnthropic + "\"\n"
+		runCmd := "/bin/sh " + leakScript
+
+		if runtime.GOOS == "windows" {
+			leakScript = filepath.Join(tmpDir, "leak.bat")
+			scriptContent = "@echo off\r\n" +
+				"echo AWS_ACCESS_KEY_ID=" + dummyAWSKey + "\r\n" +
+				"echo " + dummyGCP + "\r\n" +
+				"echo ANTHROPIC_API_KEY=" + dummyAnthropic + "\r\n"
+			runCmd = "cmd.exe /c " + leakScript
+		}
 
 		if err := os.WriteFile(leakScript, []byte(scriptContent), 0755); err != nil {
 			t.Fatalf("Failed to write leak script: %v", err)
@@ -140,7 +159,7 @@ func TestSEC32_SecretRedaction(t *testing.T) {
 
 		toolHandler := mcp.NewDefaultToolHandler()
 		execPayload, _ := json.Marshal(map[string]interface{}{
-			"command":   "/bin/sh " + leakScript,
+			"command":   runCmd,
 			"workspace": tmpDir,
 			"airgap":    true,
 		})

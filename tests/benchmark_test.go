@@ -28,13 +28,17 @@ func BenchmarkBaseline_ExecCommand(b *testing.B) {
 	if runtime.GOOS == "linux" {
 		cmdPath = "/bin/true"
 	}
-	if _, err := os.Stat(cmdPath); err != nil {
+	var args []string
+	if runtime.GOOS == "windows" {
+		cmdPath = "cmd.exe"
+		args = []string{"/c", "exit 0"}
+	} else if _, err := os.Stat(cmdPath); err != nil {
 		cmdPath = "/bin/echo"
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		cmd := exec.Command(cmdPath)
+		cmd := exec.Command(cmdPath, args...)
 		if err := cmd.Run(); err != nil {
 			b.Fatalf("Baseline exec failed: %v", err)
 		}
@@ -48,8 +52,14 @@ func BenchmarkAirlock_SandboxInvocation(b *testing.B) {
 	if runtime.GOOS == "linux" {
 		cmdPath = "/bin/true"
 	}
-	if _, err := os.Stat(cmdPath); err != nil {
-		cmdPath = "/bin/echo"
+	var execArgs []string
+	if runtime.GOOS == "windows" {
+		execArgs = []string{"cmd.exe", "/c", "exit 0"}
+	} else {
+		if _, err := os.Stat(cmdPath); err != nil {
+			cmdPath = "/bin/echo"
+		}
+		execArgs = []string{cmdPath}
 	}
 
 	opts := sandbox.Options{
@@ -68,7 +78,7 @@ func BenchmarkAirlock_SandboxInvocation(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		code, err := eng.Execute(ctx, []string{cmdPath})
+		code, err := eng.Execute(ctx, execArgs)
 		if err != nil || code != 0 {
 			b.Fatalf("Sandboxed execution failed (code: %d): %v", code, err)
 		}
