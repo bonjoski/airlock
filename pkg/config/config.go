@@ -241,8 +241,7 @@ func SanitizeAndEnforceGuardrails(cfg *Config) []ValidationIssue {
 	// 3. Environment allow guardrails (cannot allow core dangerous injection vectors)
 	var sanitizedEnvAllow []string
 	for _, e := range cfg.Env.Allow {
-		upper := strings.ToUpper(strings.TrimSpace(e))
-		if upper == "LD_PRELOAD" || upper == "DYLD_INSERT_LIBRARIES" || upper == "DYLD_FORCE_FLAT_NAMESPACE" {
+		if IsForbiddenEnv(e) {
 			issues = append(issues, ValidationIssue{
 				Field:    "env.allow",
 				Severity: "WARNING",
@@ -255,6 +254,17 @@ func SanitizeAndEnforceGuardrails(cfg *Config) []ValidationIssue {
 	cfg.Env.Allow = sanitizedEnvAllow
 
 	return issues
+}
+
+// IsForbiddenEnv checks if an environment variable is restricted by core security guardrails.
+func IsForbiddenEnv(e string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(e))
+	return upper == "LD_PRELOAD" || upper == "DYLD_INSERT_LIBRARIES" || upper == "DYLD_FORCE_FLAT_NAMESPACE"
+}
+
+// IsForbiddenPath checks if a path targets sensitive secrets or restricted system files.
+func IsForbiddenPath(p string) bool {
+	return isForbiddenPath(p)
 }
 
 func isForbiddenPath(p string) bool {

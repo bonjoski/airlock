@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -158,6 +159,10 @@ func TestLinuxEngine_BuildBwrapArgs(t *testing.T) {
 }
 
 func TestLinuxEngine_NestedBypass(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux only")
+	}
+
 	origVal := os.Getenv("__AIRLOCK_ACTIVE")
 	_ = os.Setenv("__AIRLOCK_ACTIVE", "1")
 	defer func() {

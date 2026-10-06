@@ -20,9 +20,8 @@ func TestDefaultManager_Lifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to stat scratch root: %v", err)
 	}
-	perm := info.Mode().Perm()
-	if perm != 0700 {
-		t.Errorf("Expected 0700 permissions, got %#o", perm)
+	if !IsPrivatePermissions(info.Mode()) {
+		t.Errorf("Expected private permissions (0700 on POSIX), got %#o", info.Mode().Perm())
 	}
 
 	// Verify subdirectories

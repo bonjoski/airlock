@@ -150,6 +150,10 @@ env:
 // TestSEC28_DoctorDiagnosesStoragePermissionFailure verifies that storage permission
 // denials are identified and reported as failures (SEC-28).
 func TestSEC28_DoctorDiagnosesStoragePermissionFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows directories do not support POSIX read-only mode bits")
+	}
+
 	tempDir := t.TempDir()
 	readOnlyHome := filepath.Join(tempDir, "ro_home")
 	_ = os.Mkdir(readOnlyHome, 0555)

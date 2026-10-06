@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -548,25 +547,10 @@ func (h *DefaultToolHandler) HandlePolicyCheck(ctx context.Context, rawArgs json
 	// 2. Evaluate Path if requested
 	if strings.TrimSpace(args.Path) != "" {
 		targetPath := strings.TrimSpace(args.Path)
-		cleanPath := filepath.Clean(targetPath)
-
-		isForbidden := false
+		isForbidden := config.IsForbiddenPath(targetPath)
 		forbiddenReason := ""
-
-		// Check guardrails against secrets
-		homeDir, _ := os.UserHomeDir()
-		if (homeDir != "" && strings.HasPrefix(cleanPath, filepath.Join(homeDir, ".ssh"))) || strings.HasPrefix(targetPath, "~/.ssh") {
-			isForbidden = true
-			forbiddenReason = "Strictly blocked by Airlock Guardrail: SSH credentials cannot be accessed."
-		} else if (homeDir != "" && strings.HasPrefix(cleanPath, filepath.Join(homeDir, ".aws"))) || strings.HasPrefix(targetPath, "~/.aws") {
-			isForbidden = true
-			forbiddenReason = "Strictly blocked by Airlock Guardrail: AWS credentials cannot be accessed."
-		} else if cleanPath == "/var/run/docker.sock" {
-			isForbidden = true
-			forbiddenReason = "Strictly blocked by Airlock Guardrail: Docker daemon socket cannot be accessed."
-		} else if strings.Contains(cleanPath, ".git/hooks") {
-			isForbidden = true
-			forbiddenReason = "Strictly blocked by Airlock Guardrail: Git persistence hooks are write-protected."
+		if isForbidden {
+			forbiddenReason = "Strictly blocked by Airlock Guardrail: sensitive secret or restricted system path."
 		}
 
 		res.PathCheck = map[string]interface{}{
@@ -585,11 +569,9 @@ func (h *DefaultToolHandler) HandlePolicyCheck(ctx context.Context, rawArgs json
 	// 3. Evaluate Env Var if requested
 	if strings.TrimSpace(args.EnvVar) != "" {
 		envVar := strings.TrimSpace(args.EnvVar)
-		forbidden := false
+		forbidden := config.IsForbiddenEnv(envVar) || envVar == "DYLD_LIBRARY_PATH"
 		reason := "Permitted if present in allowlist"
-
-		if envVar == "LD_PRELOAD" || envVar == "DYLD_INSERT_LIBRARIES" || envVar == "DYLD_LIBRARY_PATH" {
-			forbidden = true
+		if forbidden {
 			reason = "Strictly stripped by Airlock Guardrail: Dynamic linker injection variable."
 		}
 

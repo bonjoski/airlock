@@ -8,9 +8,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
+
+// IsPrivatePermissions verifies that directory permissions enforce private access.
+// On POSIX systems, this requires strict 0700 permissions. On Windows NTFS (where directory
+// POSIX bits are not modeled and os.Stat always reports 0777), any non-error mode is accepted.
+func IsPrivatePermissions(mode os.FileMode) bool {
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return mode.Perm() == 0700
+}
 
 // Manager defines the interface for ephemeral scratch space lifecycle management.
 type Manager interface {

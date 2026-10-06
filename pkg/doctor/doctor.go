@@ -466,7 +466,7 @@ func CheckStoragePermissions(ctx context.Context, opts Options) []CheckResult {
 				Details:        fmt.Sprintf("Failed to stat scratch directory %s: %v", sc.Root(), statErr),
 				Recommendation: "Ensure temp filesystem is functioning properly.",
 			})
-		} else if info.Mode().Perm() != 0700 {
+		} else if !scratch.IsPrivatePermissions(info.Mode()) {
 			results = append(results, CheckResult{
 				ID:             "storage-scratch-dirs",
 				Category:       "Storage & Permissions",

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -20,8 +21,12 @@ func TestShimManager_Lifecycle(t *testing.T) {
 		t.Fatalf("Install failed: %v", err)
 	}
 
-	if len(installed) != len(SupportedTools) {
-		t.Errorf("Expected %d installed shims, got %d", len(SupportedTools), len(installed))
+	expectedCount := len(SupportedTools)
+	if runtime.GOOS == "windows" {
+		expectedCount *= 2
+	}
+	if len(installed) != expectedCount {
+		t.Errorf("Expected %d installed shims, got %d", expectedCount, len(installed))
 	}
 
 	for _, p := range installed {
@@ -30,7 +35,7 @@ func TestShimManager_Lifecycle(t *testing.T) {
 			t.Errorf("Failed to stat installed shim %s: %v", p, err)
 			continue
 		}
-		if info.Mode()&0111 == 0 {
+		if !IsExecutable(info) {
 			t.Errorf("Shim %s is not executable: mode %v", p, info.Mode())
 		}
 		content, err := os.ReadFile(p)
@@ -81,28 +86,40 @@ func TestShim_RecursionBypassExecution(t *testing.T) {
 	_ = os.MkdirAll(shimDir, 0755)
 	_ = os.MkdirAll(realBinDir, 0755)
 
-	// Create a mock "npm" real binary in realBinDir
-	realNpm := filepath.Join(realBinDir, "npm")
+	npmName := "npm"
 	realContent := "#!/bin/sh\necho \"REAL_NPM_CALLED:$@\"\n"
+	shimContent := generateShimScript("npm")
+	execBin := "/bin/sh"
+	if runtime.GOOS == "windows" {
+		npmName = "npm.cmd"
+		realContent = "@echo off\r\necho REAL_NPM_CALLED:%*\r\n"
+		shimContent = generateWindowsCmdScript("npm")
+		execBin = "cmd.exe"
+	}
+
+	// Create a mock "npm" real binary in realBinDir
+	realNpm := filepath.Join(realBinDir, npmName)
 	if err := os.WriteFile(realNpm, []byte(realContent), 0755); err != nil {
 		t.Fatalf("Failed to write real npm: %v", err)
 	}
 
 	// Generate and install the shim in shimDir
-	shimNpm := filepath.Join(shimDir, "npm")
-	if err := os.WriteFile(shimNpm, []byte(generateShimScript("npm")), 0755); err != nil {
+	shimNpm := filepath.Join(shimDir, npmName)
+	if err := os.WriteFile(shimNpm, []byte(shimContent), 0755); err != nil {
 		t.Fatalf("Failed to write shim npm: %v", err)
 	}
 
 	// Setup PATH with shimDir FIRST, realBinDir SECOND, and system utilities
-	customPath := shimDir + string(os.PathListSeparator) + realBinDir + string(os.PathListSeparator) + "/bin" + string(os.PathListSeparator) + "/usr/bin"
+	customPath := shimDir + string(os.PathListSeparator) + realBinDir + string(os.PathListSeparator) + os.Getenv("PATH")
 
 	// Execute the shim with __AIRLOCK_ACTIVE=1
-	cmd := exec.Command("/bin/sh", shimNpm, "test-arg-1", "test-arg-2")
-	cmd.Env = []string{
-		"PATH=" + customPath,
-		"__AIRLOCK_ACTIVE=1",
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command(execBin, "/c", shimNpm, "test-arg-1", "test-arg-2")
+	} else {
+		cmd = exec.Command(execBin, shimNpm, "test-arg-1", "test-arg-2")
 	}
+	cmd.Env = append(os.Environ(), "PATH="+customPath, "__AIRLOCK_ACTIVE=1")
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {

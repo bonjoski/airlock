@@ -166,7 +166,7 @@ func findHostBinary(tool string, shimDir string) string {
 		}
 		for _, candidate := range candidates {
 			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-				if runtime.GOOS == "windows" || (info.Mode()&0111 != 0) {
+				if IsExecutable(info) {
 					return candidate
 				}
 			}
@@ -209,27 +209,40 @@ func generateShimScript(tool string) string {
 	return sb.String()
 }
 
+// IsExecutable checks whether a file is executable on the current platform.
+// On Windows, executability is determined by file extension and PATHEXT.
+// On POSIX systems, it verifies that at least one executable bit (0111) is set.
+func IsExecutable(info os.FileInfo) bool {
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return info.Mode()&0111 != 0
+}
+
+const windowsCmdTemplate = `@echo off
+rem Airlock Transparent Toolchain Shim for {{TOOL}}
+rem Copyright 2026 Ben Skolmoski - MIT License
+
+setlocal
+if "%__AIRLOCK_ACTIVE%"=="1" (
+    set "CURRENT_DIR=%~dp0"
+    for %%F in ({{TOOL}}.cmd {{TOOL}}.exe {{TOOL}}.bat {{TOOL}}) do (
+        for /f "delims=" %%I in ('where %%F 2^>nul') do (
+            if not "%%~dpI"=="%CURRENT_DIR%" (
+                endlocal
+                "%%I" %*
+                exit /b %errorlevel%
+            )
+        )
+    )
+    echo airlock shim: unable to locate host {{TOOL}} outside of %CURRENT_DIR% >&2
+    exit /b 127
+)
+endlocal
+
+airlock.exe run -- {{TOOL}} %*
+`
+
 func generateWindowsCmdScript(tool string) string {
-	var sb strings.Builder
-	sb.WriteString("@echo off\n")
-	sb.WriteString(fmt.Sprintf("rem Airlock Transparent Toolchain Shim for %s\n", tool))
-	sb.WriteString("rem Copyright 2026 Ben Skolmoski - MIT License\n\n")
-	sb.WriteString("setlocal\n")
-	sb.WriteString("if \"%__AIRLOCK_ACTIVE%\"==\"1\" (\n")
-	sb.WriteString("    set \"CURRENT_DIR=%~dp0\"\n")
-	sb.WriteString(fmt.Sprintf("    for %%%%F in (%s.cmd %s.exe %s.bat %s) do (\n", tool, tool, tool, tool))
-	sb.WriteString("        for /f \"delims=\" %%%%I in ('where %%%%F 2^>nul') do (\n")
-	sb.WriteString("            if not \"%%%%~dpI\"==\"%CURRENT_DIR%\" (\n")
-	sb.WriteString("                endlocal\n")
-	sb.WriteString("                \"%%%%I\" %*\n")
-	sb.WriteString("                exit /b %errorlevel%\n")
-	sb.WriteString("            )\n")
-	sb.WriteString("        )\n")
-	sb.WriteString("    )\n")
-	sb.WriteString(fmt.Sprintf("    echo airlock shim: unable to locate host %s outside of %%CURRENT_DIR%% >&2\n", tool))
-	sb.WriteString("    exit /b 127\n")
-	sb.WriteString(")\n")
-	sb.WriteString("endlocal\n\n")
-	sb.WriteString(fmt.Sprintf("airlock.exe run -- %s %%*\n", tool))
-	return sb.String()
+	return strings.ReplaceAll(windowsCmdTemplate, "{{TOOL}}", tool)
 }
