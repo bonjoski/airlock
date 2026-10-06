@@ -425,12 +425,7 @@ func TestSEC14_NestedAirlockBypass(t *testing.T) {
 		t.Fatalf("NewEngine failed: %v", err)
 	}
 
-	cmdArgs := []string{"/bin/sh", "-c", "echo nested-ok"}
-	if runtime.GOOS == "windows" {
-		cmdArgs = []string{"cmd.exe", "/c", "echo nested-ok"}
-	}
-
-	code, err := eng.Execute(context.Background(), cmdArgs)
+	code, err := eng.Execute(context.Background(), PlatformCmd("/bin/sh", "-c", "echo nested-ok"))
 	if err != nil {
 		t.Fatalf("SEC-14 FAILED: Nested execution returned unexpected error: %v", err)
 	}
@@ -556,35 +551,15 @@ func TestSEC17_ShimRecursionPrevention(t *testing.T) {
 	_ = os.MkdirAll(shimDir, 0755)
 	_ = os.MkdirAll(realBinDir, 0755)
 
+	npmName := "npm"
+	npmContent := "#!/bin/sh\necho SHIM_BYPASS_OK\n"
 	if runtime.GOOS == "windows" {
-		realNpm := filepath.Join(realBinDir, "npm.cmd")
-		_ = os.WriteFile(realNpm, []byte("@echo off\r\necho SHIM_BYPASS_OK\r\n"), 0755)
-
-		mgr := shim.NewManager()
-		_, err := mgr.Install(shimDir)
-		if err != nil {
-			t.Fatalf("SEC-17 FAILED: Failed to install shims: %v", err)
-		}
-
-		shimNpm := filepath.Join(shimDir, "npm.cmd")
-		customPath := shimDir + ";" + realBinDir + ";" + os.Getenv("PATH")
-
-		cmd := exec.Command("cmd.exe", "/c", shimNpm)
-		cmd.Env = append(os.Environ(), "PATH="+customPath, "__AIRLOCK_ACTIVE=1")
-
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("SEC-17 FAILED: Shim execution failed: %v (output: %s)", err, out)
-		}
-
-		if !strings.Contains(string(out), "SHIM_BYPASS_OK") {
-			t.Errorf("SEC-17 FAILED: Expected SHIM_BYPASS_OK from real binary, got: %s", string(out))
-		}
-		return
+		npmName = "npm.cmd"
+		npmContent = "@echo off\r\necho SHIM_BYPASS_OK\r\n"
 	}
 
-	realNpm := filepath.Join(realBinDir, "npm")
-	_ = os.WriteFile(realNpm, []byte("#!/bin/sh\necho SHIM_BYPASS_OK\n"), 0755)
+	realNpm := filepath.Join(realBinDir, npmName)
+	_ = os.WriteFile(realNpm, []byte(npmContent), 0755)
 
 	mgr := shim.NewManager()
 	_, err := mgr.Install(shimDir)
@@ -592,11 +567,12 @@ func TestSEC17_ShimRecursionPrevention(t *testing.T) {
 		t.Fatalf("SEC-17 FAILED: Failed to install shims: %v", err)
 	}
 
-	shimNpm := filepath.Join(shimDir, "npm")
-	customPath := shimDir + ":" + realBinDir + ":/bin:/usr/bin"
+	shimNpm := filepath.Join(shimDir, npmName)
+	customPath := PlatformPathList(shimDir, realBinDir, os.Getenv("PATH"))
 
-	cmd := exec.Command("/bin/sh", shimNpm)
-	cmd.Env = []string{"PATH=" + customPath, "__AIRLOCK_ACTIVE=1"}
+	cmdArgs := PlatformCmd("/bin/sh", shimNpm)
+	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
+	cmd.Env = append(os.Environ(), "PATH="+customPath, "__AIRLOCK_ACTIVE=1")
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -649,11 +625,7 @@ func TestSEC18_ArgusStaticAnalysisHandoff(t *testing.T) {
 		t.Fatalf("SEC-18 FAILED: NewEngine failed: %v", err)
 	}
 
-	benignCmd := []string{"/bin/echo", "benign-argus-test"}
-	if runtime.GOOS == "windows" {
-		benignCmd = []string{"cmd.exe", "/c", "echo benign-argus-test"}
-	}
-	code, err := eng.Execute(context.Background(), benignCmd)
+	code, err := eng.Execute(context.Background(), PlatformCmd("/bin/echo", "benign-argus-test"))
 	if err != nil {
 		t.Fatalf("SEC-18 FAILED: Expected benign execution to pass: %v", err)
 	}
@@ -689,11 +661,7 @@ func TestSEC18_ArgusStaticAnalysisHandoff(t *testing.T) {
 		}
 		t.Fatalf("SEC-18 FAILED: NewEngine with custom Inspector failed: %v", err)
 	}
-	mockCmd := []string{"/bin/echo", "test"}
-	if runtime.GOOS == "windows" {
-		mockCmd = []string{"cmd.exe", "/c", "echo test"}
-	}
-	mockCode, mockErr := mockEng.Execute(context.Background(), mockCmd)
+	mockCode, mockErr := mockEng.Execute(context.Background(), PlatformCmd("/bin/echo", "test"))
 	if mockErr == nil || mockCode != 1 {
 		t.Errorf("SEC-18 FAILED: Expected custom mock inspector to block execution")
 	}
@@ -1035,27 +1003,11 @@ func TestSEC26_MCPSandboxConfinement(t *testing.T) {
 	server := mcp.NewServer(nil, nil)
 
 	// 1. Attempt unauthorized ~/.ssh read via airlock_exec tool call
-	catCmd := "/bin/cat " + sshKeyPath
-	if runtime.GOOS == "windows" {
-		catCmd = "cmd.exe /c type " + sshKeyPath
-	}
-	reqMap := map[string]interface{}{
-		"jsonrpc": "2.0",
-		"id":      101,
-		"method":  "tools/call",
-		"params": map[string]interface{}{
-			"name": "airlock_exec",
-			"arguments": map[string]interface{}{
-				"command":   catCmd,
-				"workspace": tempDir,
-				"airgap":    true,
-			},
-		},
-	}
-	reqJSON, err := json.Marshal(reqMap)
-	if err != nil {
-		t.Fatalf("SEC-26 FAILED: Failed to marshal request: %v", err)
-	}
+	reqJSON := JSONRPCToolCall(101, "airlock_exec", map[string]interface{}{
+		"command":   PlatformCmdString("/bin/cat " + sshKeyPath),
+		"workspace": tempDir,
+		"airgap":    true,
+	})
 
 	resp, err := server.HandleMessage(context.Background(), reqJSON)
 	if err != nil {
@@ -1122,24 +1074,12 @@ func TestSEC27_MCPVetAndPolicyCheck(t *testing.T) {
 	cfgPath := filepath.Join(tempDir, "airlock.yaml")
 	_ = os.WriteFile(cfgPath, []byte("version: \"1\"\nmode: \"strict\"\n"), 0644)
 
-	policyReq := map[string]interface{}{
-		"jsonrpc": "2.0",
-		"id":      103,
-		"method":  "tools/call",
-		"params": map[string]interface{}{
-			"name": "airlock_policy_check",
-			"arguments": map[string]interface{}{
-				"config_path": cfgPath,
-				"path":        "/var/run/docker.sock",
-				"env_var":     "DYLD_INSERT_LIBRARIES",
-				"domain":      "evil-exfil.com",
-			},
-		},
-	}
-	policyReqJSON, err := json.Marshal(policyReq)
-	if err != nil {
-		t.Fatalf("SEC-27 FAILED: Failed to marshal policy request: %v", err)
-	}
+	policyReqJSON := JSONRPCToolCall(103, "airlock_policy_check", map[string]interface{}{
+		"config_path": cfgPath,
+		"path":        "/var/run/docker.sock",
+		"env_var":     "DYLD_INSERT_LIBRARIES",
+		"domain":      "evil-exfil.com",
+	})
 
 	polResp, err := server.HandleMessage(context.Background(), policyReqJSON)
 	if err != nil {

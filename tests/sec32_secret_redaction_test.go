@@ -69,11 +69,7 @@ func TestSEC32_SecretRedaction(t *testing.T) {
 		defer cancel()
 
 		fakeToken := "gh" + "p_" + strings.Repeat("9876", 9)
-		echoCmd := []string{"echo", "leaked token: " + fakeToken}
-		if runtime.GOOS == "windows" {
-			echoCmd = []string{"cmd.exe", "/c", "echo leaked token: " + fakeToken}
-		}
-		exitCode, err := engine.Execute(ctx, echoCmd)
+		exitCode, err := engine.Execute(ctx, PlatformCmd("echo", "leaked token: "+fakeToken))
 		_ = redactingWriter.Close()
 
 		if err != nil {
@@ -97,12 +93,8 @@ func TestSEC32_SecretRedaction(t *testing.T) {
 		toolHandler := mcp.NewDefaultToolHandler()
 
 		fakeOpenAI := "sk-proj-" + strings.Repeat("1234567890ab", 4)
-		execCmd := "echo export OPENAI_API_KEY=" + fakeOpenAI
-		if runtime.GOOS == "windows" {
-			execCmd = "cmd.exe /c echo export OPENAI_API_KEY=" + fakeOpenAI
-		}
 		execPayload, _ := json.Marshal(map[string]interface{}{
-			"command":   execCmd,
+			"command":   PlatformCmdString("echo export OPENAI_API_KEY=" + fakeOpenAI),
 			"workspace": tmpDir,
 			"airgap":    true,
 		})

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -191,20 +190,12 @@ end
 `
 		_ = os.WriteFile(filepath.Join(tempDir, "trojan.gemspec"), []byte(gemspec), 0644)
 
-		reqJSON := fmt.Sprintf(`{
-			"jsonrpc": "2.0",
-			"id": 301,
-			"method": "tools/call",
-			"params": {
-				"name": "airlock_vet",
-				"arguments": {
-					"workspace": "%s",
-					"strict": true
-				}
-			}
-		}`, tempDir)
+		reqJSON := JSONRPCToolCall(301, "airlock_vet", map[string]interface{}{
+			"workspace": tempDir,
+			"strict":    true,
+		})
 
-		resp, err := server.HandleMessage(context.Background(), []byte(reqJSON))
+		resp, err := server.HandleMessage(context.Background(), reqJSON)
 		if err != nil {
 			t.Fatalf("SEC-31 FAILED: HandleMessage error: %v", err)
 		}
