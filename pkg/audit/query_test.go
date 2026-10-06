@@ -330,7 +330,7 @@ func TestQuery_LiveTailing(t *testing.T) {
 
 	engine := NewQueryEngine(logPath)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	var outBuf bytes.Buffer

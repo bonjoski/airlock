@@ -142,6 +142,10 @@ func (l *FileLogger) writeRecord(record any) error {
 		return fmt.Errorf("audit: failed to write audit entry: %w", err)
 	}
 
+	if syncer, ok := l.writer.(interface{ Sync() error }); ok {
+		_ = syncer.Sync()
+	}
+
 	return nil
 }
 

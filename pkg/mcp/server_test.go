@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -95,25 +95,36 @@ func TestMCPServer_ToolsList(t *testing.T) {
 	}
 }
 
+func makeToolCallRequest(id any, tool string, args map[string]interface{}) []byte {
+	req := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"method":  "tools/call",
+		"params": map[string]interface{}{
+			"name":      tool,
+			"arguments": args,
+		},
+	}
+	b, _ := json.Marshal(req)
+	return b
+}
+
 func TestMCPServer_ToolCall_Exec(t *testing.T) {
 	tempDir := t.TempDir()
 	s := NewServer(nil, nil)
 
-	reqJSON := fmt.Sprintf(`{
-		"jsonrpc": "2.0",
-		"id": 4,
-		"method": "tools/call",
-		"params": {
-			"name": "airlock_exec",
-			"arguments": {
-				"command": "echo hello-mcp-airlock",
-				"workspace": "%s",
-				"airgap": true
-			}
-		}
-	}`, tempDir)
+	cmdStr := "echo hello-mcp-airlock"
+	if runtime.GOOS == "windows" {
+		cmdStr = "cmd.exe /c echo hello-mcp-airlock"
+	}
 
-	resp, err := s.HandleMessage(context.Background(), []byte(reqJSON))
+	reqJSON := makeToolCallRequest(4, "airlock_exec", map[string]interface{}{
+		"command":   cmdStr,
+		"workspace": tempDir,
+		"airgap":    true,
+	})
+
+	resp, err := s.HandleMessage(context.Background(), reqJSON)
 	if err != nil {
 		t.Fatalf("HandleMessage error: %v", err)
 	}
@@ -227,22 +238,14 @@ network:
 
 	s := NewServer(nil, nil)
 
-	reqJSON := fmt.Sprintf(`{
-		"jsonrpc": "2.0",
-		"id": 7,
-		"method": "tools/call",
-		"params": {
-			"name": "airlock_policy_check",
-			"arguments": {
-				"config_path": "%s",
-				"domain": "api.mycorp.internal",
-				"path": "~/.ssh/id_rsa",
-				"env_var": "LD_PRELOAD"
-			}
-		}
-	}`, cfgPath)
+	reqJSON := makeToolCallRequest(7, "airlock_policy_check", map[string]interface{}{
+		"config_path": cfgPath,
+		"domain":      "api.mycorp.internal",
+		"path":        "~/.ssh/id_rsa",
+		"env_var":     "LD_PRELOAD",
+	})
 
-	resp, err := s.HandleMessage(context.Background(), []byte(reqJSON))
+	resp, err := s.HandleMessage(context.Background(), reqJSON)
 	if err != nil {
 		t.Fatalf("HandleMessage error: %v", err)
 	}

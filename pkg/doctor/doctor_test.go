@@ -214,6 +214,10 @@ func TestDoctor_CheckStoragePermissions(t *testing.T) {
 }
 
 func TestDoctor_CheckStoragePermissions_Failure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows directories do not support POSIX read-only mode bits")
+	}
+
 	ctx := context.Background()
 	tempDir := t.TempDir()
 
@@ -265,11 +269,13 @@ func TestDoctor_CheckToolchainShims(t *testing.T) {
 	tempDir := t.TempDir()
 	shimDir := filepath.Join(tempDir, "shims")
 
+	sep := string(os.PathListSeparator)
+
 	// Case 1: Shim dir not in PATH
 	opts1 := Options{
 		HomeDir: tempDir,
 		ShimDir: shimDir,
-		PathEnv: "/usr/bin:/bin",
+		PathEnv: strings.Join([]string{"/usr/bin", "/bin"}, sep),
 	}
 
 	res1 := CheckToolchainShims(ctx, opts1)
@@ -292,7 +298,7 @@ func TestDoctor_CheckToolchainShims(t *testing.T) {
 	opts2 := Options{
 		HomeDir: tempDir,
 		ShimDir: shimDir,
-		PathEnv: "/usr/bin:" + shimDir + ":/bin",
+		PathEnv: strings.Join([]string{"/usr/bin", shimDir, "/bin"}, sep),
 	}
 
 	res2 := CheckToolchainShims(ctx, opts2)

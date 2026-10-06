@@ -2,11 +2,16 @@ package env
 
 import (
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestSanitizer_Sanitize(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX path test; see TestSanitizer_WindowsEnvironment")
+	}
+
 	hostEnv := []string{
 		"PATH=/usr/bin:.:./bin:/bin:/usr/local/bin",
 		"TERM=xterm-256color",
@@ -101,6 +106,10 @@ func TestSanitizer_Sanitize(t *testing.T) {
 }
 
 func TestSanitizePath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX path test; see TestSanitizer_WindowsEnvironment")
+	}
+
 	input := "/bin:.:./scripts:../other:/usr/bin:/:   :/usr/local/bin"
 	clean := SanitizePath(input)
 	expected := strings.Join([]string{"/bin", "/usr/bin", "/usr/local/bin"}, string(os.PathListSeparator))
@@ -110,6 +119,10 @@ func TestSanitizePath(t *testing.T) {
 }
 
 func TestSanitizePath_ShimDirStripped(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX path test; see TestSanitizer_WindowsEnvironment")
+	}
+
 	home, _ := os.UserHomeDir()
 	shimDir := home + "/.airlock/bin"
 	input := shimDir + ":/usr/bin:/bin"

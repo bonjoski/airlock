@@ -225,17 +225,26 @@ rem Copyright 2026 Ben Skolmoski - MIT License
 
 setlocal
 if "%__AIRLOCK_ACTIVE%"=="1" (
-    set "CURRENT_DIR=%~dp0"
+    if "%__AIRLOCK_SHIM_NESTED%"=="1" (
+        echo airlock shim: recursion detected for {{TOOL}} >&2
+        exit /b 127
+    )
+    set "__AIRLOCK_SHIM_NESTED=1"
     for %%F in ({{TOOL}}.cmd {{TOOL}}.exe {{TOOL}}.bat {{TOOL}}) do (
         for /f "delims=" %%I in ('where %%F 2^>nul') do (
-            if not "%%~dpI"=="%CURRENT_DIR%" (
-                endlocal
-                "%%I" %*
-                exit /b %errorlevel%
+            if /i not "%%~fI"=="%~f0" (
+                if /i not "%%~sI"=="%~s0" (
+                    if /i not "%%~dpI"=="%~dp0" (
+                        endlocal
+                        set "__AIRLOCK_SHIM_NESTED=1"
+                        "%%I" %*
+                        exit /b %errorlevel%
+                    )
+                )
             )
         )
     )
-    echo airlock shim: unable to locate host {{TOOL}} outside of %CURRENT_DIR% >&2
+    echo airlock shim: unable to locate host {{TOOL}} outside of %~dp0 >&2
     exit /b 127
 )
 endlocal
