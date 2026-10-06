@@ -356,7 +356,23 @@ func TestQuery_LiveTailing(t *testing.T) {
 	_ = logger.LogNetwork(NetworkRecord{Host: "new-site.com", Port: 80, Action: "ALLOW"})
 	_ = logger.LogSecurity(SecurityRecord{Category: "sandbox_escape", Details: "blocked ptrace call"})
 
+	// Poll until both streamed records appear in output or timeout
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		cur := outBuf.String()
+		mu.Unlock()
+		if strings.Contains(cur, "new-site.com") && strings.Contains(cur, "sandbox_escape") {
+			cancel()
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
 	err = <-tailDone
+	_ = logger.Close()
+	_ = f.Close()
+
 	if err != nil && err != context.DeadlineExceeded && err != context.Canceled {
 		t.Fatalf("Tail returned unexpected error: %v", err)
 	}
