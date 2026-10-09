@@ -8,6 +8,8 @@ import (
 	"io"
 	"strings"
 	"sync"
+
+	"github.com/bonjoski/airlock/pkg/version"
 )
 
 // Server implements an MCP (Model Context Protocol) JSON-RPC 2.0 stdio server.
@@ -60,7 +62,7 @@ func NewServer(in io.Reader, out io.Writer, opts ...ServerOption) *Server {
 		toolHandler:     NewDefaultToolHandler(),
 		resourceHandler: NewDefaultResourceHandler(),
 		promptHandler:   NewDefaultPromptHandler(),
-		version:         "1.1.0",
+		version:         version.Version,
 	}
 	for _, opt := range opts {
 		opt(s)

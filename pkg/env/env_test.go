@@ -27,9 +27,9 @@ func TestSanitizer_Sanitize(t *testing.T) {
 	}
 
 	cfg := Config{
-		VirtualHome:  "/tmp/boxpkg-test/home",
-		ScratchDir:   "/tmp/boxpkg-test/tmp",
-		StagingCache: "/tmp/boxpkg-test/cache",
+		VirtualHome:  "/tmp/airlock-test/home",
+		ScratchDir:   "/tmp/airlock-test/tmp",
+		StagingCache: "/tmp/airlock-test/cache",
 		ProxyURL:     "http://127.0.0.1:18443",
 		KeepEnv:      []string{"CUSTOM_ALLOWED_VAR"},
 	}
@@ -74,18 +74,18 @@ func TestSanitizer_Sanitize(t *testing.T) {
 	}
 
 	// 4. Virtual paths must be injected
-	if envMap["HOME"] != "/tmp/boxpkg-test/home" {
+	if envMap["HOME"] != "/tmp/airlock-test/home" {
 		t.Errorf("Expected virtual HOME, got %s", envMap["HOME"])
 	}
-	if envMap["TMPDIR"] != "/tmp/boxpkg-test/tmp" {
+	if envMap["TMPDIR"] != "/tmp/airlock-test/tmp" {
 		t.Errorf("Expected virtual TMPDIR, got %s", envMap["TMPDIR"])
 	}
 
 	// 5. Ephemeral cache redirects must be present
-	if envMap["npm_config_cache"] != "/tmp/boxpkg-test/cache/npm" {
+	if envMap["npm_config_cache"] != "/tmp/airlock-test/cache/npm" {
 		t.Errorf("Expected npm_config_cache redirect, got %s", envMap["npm_config_cache"])
 	}
-	if envMap["PIP_CACHE_DIR"] != "/tmp/boxpkg-test/cache/pip" {
+	if envMap["PIP_CACHE_DIR"] != "/tmp/airlock-test/cache/pip" {
 		t.Errorf("Expected PIP_CACHE_DIR redirect, got %s", envMap["PIP_CACHE_DIR"])
 	}
 

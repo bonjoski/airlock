@@ -11,7 +11,7 @@
 set -eu
 
 REPO="bonjoski/airlock"
-DEFAULT_VERSION="v0.5.0"
+DEFAULT_VERSION="v0.6.0"
 
 # Color helpers (disabled if not connected to a terminal)
 if [ -t 1 ]; then
@@ -187,7 +187,6 @@ if [ "$DRY_RUN" = "1" ]; then
     log_info "[DRY-RUN] Would download: ${CHECKSUMS_URL}"
     log_info "[DRY-RUN] Would verify SHA256 checksum for ${TARBALL_NAME}"
     log_info "[DRY-RUN] Would extract binary into ${INSTALL_DIR}/airlock"
-    log_info "[DRY-RUN] Would create symlink ${INSTALL_DIR}/boxpkg -> airlock"
     if [ "$INSTALL_SHIMS" = "1" ]; then
         log_info "[DRY-RUN] Would run: ${INSTALL_DIR}/airlock shim install"
     fi
@@ -265,7 +264,6 @@ fi
 
 mv "${TMP_DIR}/airlock" "${INSTALL_DIR}/airlock"
 chmod 755 "${INSTALL_DIR}/airlock"
-ln -sf airlock "${INSTALL_DIR}/boxpkg"
 
 if [ -f "${TMP_DIR}/airlock-mcp" ]; then
     mv "${TMP_DIR}/airlock-mcp" "${INSTALL_DIR}/airlock-mcp"

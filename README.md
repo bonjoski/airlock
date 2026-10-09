@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Sigstore Cosign](https://img.shields.io/badge/Signed_with-Sigstore_Cosign-blueviolet.svg)](https://docs.sigstore.dev)
 
-Airlock (`airlock`, aliased as `boxpkg`) provides sub-8ms, zero-VM process confinement for package managers (`npm`, `pip`, `cargo`, `uv`, `bun`, `pnpm`, `yarn`) and autonomous AI coding agents (Claude Desktop, Cursor, Gemini CLI, Antigravity) directly on developer workstations.
+Airlock (`airlock`) provides sub-8ms, zero-VM process confinement for package managers (`npm`, `pip`, `cargo`, `uv`, `bun`, `pnpm`, `yarn`) and autonomous AI coding agents (Claude Desktop, Cursor, Gemini CLI, Antigravity) directly on developer workstations.
 
 ---
 
@@ -90,7 +90,7 @@ flowchart LR
     end
 
     subgraph Tier3["Tier 3: Workstation Sandbox"]
-        Airlock["🛡️ Project Airlock (boxpkg)<br/>• Zero-VM Kernel Confinement (Seatbelt/bwrap)<br/>• Host & Workspace Secret Masking (~/.ssh, .env)<br/>• Ephemeral Proxy & DNS Interceptor<br/>• Dynamic Output Secret Redaction"]
+        Airlock["🛡️ Project Airlock<br/>• Zero-VM Kernel Confinement (Seatbelt/bwrap)<br/>• Host & Workspace Secret Masking (~/.ssh, .env)<br/>• Ephemeral Proxy & DNS Interceptor<br/>• Dynamic Output Secret Redaction"]
     end
 
     Dev --> Tier1
@@ -105,7 +105,7 @@ flowchart LR
 | :--- | :--- | :--- |
 | **[Argus](https://github.com/bonjoski/argus)** (`vetpkg`) | **Pre-Flight Provenance & Threat Vetting:** Queries upstream registries in real time to intercept hallucinated packages, typosquatting/slopsquatting, obfuscated `setup.py` scripts, and suspicious `build.rs` network logic before download. | Airlock embeds Argus rules directly into its pre-execution heuristic engine (`pkg/vet`, `--vet`, `--vetpkg`, and `airlock_vet` MCP tool). |
 | **[Locksmith](https://github.com/bonjoski/locksmith)** | **Lockfile Integrity & Governance:** Validates, cryptographically pins, and audits multi-ecosystem lockfiles (`package-lock.json`, `pnpm-lock.yaml`, `Cargo.lock`, `poetry.lock`), ensuring immutable dependency graphs and preventing unauthorized upstream drift. | Locksmith ensures that *only* cryptographically verified packages enter the pipeline, while Airlock guarantees that their installation hooks cannot escape the workstation boundary. |
-| **[Airlock](https://github.com/bonjoski/airlock)** (`boxpkg`) | **Zero-VM Runtime Process Confinement:** Provides ultra-fast (<8ms) OS kernel sandbox isolation, secret masking (`~/.ssh`, `.env`), proxy egress enforcement, and in-stream secret redaction during dependency execution. | The final, unbypassable execution boundary protecting developer workstations and autonomous AI agent loops. |
+| **[Airlock](https://github.com/bonjoski/airlock)** | **Zero-VM Runtime Process Confinement:** Provides ultra-fast (<8ms) OS kernel sandbox isolation, secret masking (`~/.ssh`, `.env`), proxy egress enforcement, and in-stream secret redaction during dependency execution. | The final, unbypassable execution boundary protecting developer workstations and autonomous AI agent loops. |
 
 ---
 

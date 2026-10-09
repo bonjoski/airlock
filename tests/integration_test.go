@@ -250,7 +250,7 @@ func TestSEC11_ProxyDomainWhitelisting(t *testing.T) {
 func TestSEC12_ScratchOrphanCleanup(t *testing.T) {
 	tempBase := t.TempDir()
 
-	orphan := filepath.Join(tempBase, "boxpkg-deadbeef12345678")
+	orphan := filepath.Join(tempBase, "airlock-deadbeef12345678")
 	_ = os.Mkdir(orphan, 0700)
 	oldTime := time.Now().Add(-48 * time.Hour)
 	_ = os.Chtimes(orphan, oldTime, oldTime)

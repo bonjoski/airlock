@@ -18,12 +18,7 @@ import (
 	"github.com/bonjoski/airlock/pkg/redact"
 	"github.com/bonjoski/airlock/pkg/sandbox"
 	"github.com/bonjoski/airlock/pkg/shim"
-)
-
-var (
-	version   = "0.5.0"
-	commit    = "unknown"
-	buildTime = "unknown"
+	"github.com/bonjoski/airlock/pkg/version"
 )
 
 func main() {
@@ -39,10 +34,10 @@ func main() {
 		printUsage()
 		os.Exit(0)
 	case "version", "-v", "--version":
-		if commit != "unknown" && commit != "" {
-			fmt.Printf("Airlock version %s (%s, built %s)\n", version, commit, buildTime)
+		if version.Commit != "unknown" && version.Commit != "" {
+			fmt.Printf("Airlock version %s (%s, built %s)\n", version.Version, version.Commit, version.BuildTime)
 		} else {
-			fmt.Printf("Airlock version %s\n", version)
+			fmt.Printf("Airlock version %s\n", version.Version)
 		}
 		os.Exit(0)
 	case "init":
@@ -227,7 +222,8 @@ func handleRun(args []string) {
 	fs.StringVar(&keepEnv, "keep-env", "", "Preserve environment variables")
 	fs.BoolVar(&vetEnabled, "vet", false, "Enable Argus static analysis inspection")
 	fs.BoolVar(&vetStrict, "vet-strict", false, "Fail closed on high/critical findings")
-	fs.StringVar(&vetTool, "vetpkg", "", "Path to external vetpkg/argus analyzer")
+	fs.StringVar(&vetTool, "vetpkg", "", "Path to external vetpkg/argus analyzer (deprecated)")
+	fs.StringVar(&vetTool, "argus", "", "Path to external argus analyzer")
 	fs.BoolVar(&nonInteractive, "non-interactive", false, "Force headless non-interactive pipe")
 	fs.StringVar(&workspace, "workspace", "", "Override workspace root")
 	fs.StringVar(&scratchBase, "scratch-base", "", "Scratch directory base")
@@ -505,7 +501,7 @@ func handleShim(args []string) {
 }
 
 func handleMCP(args []string) {
-	server := mcp.NewServer(os.Stdin, os.Stdout, mcp.WithVersion(version))
+	server := mcp.NewServer(os.Stdin, os.Stdout, mcp.WithVersion(version.Version))
 	if err := server.Serve(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "airlock mcp: server error: %v\n", err)
 		os.Exit(1)

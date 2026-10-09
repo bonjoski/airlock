@@ -40,7 +40,7 @@ func NewGenerator() *ProfileGenerator {
 	return &ProfileGenerator{}
 }
 
-const profileTemplate = `;; Airlock (boxpkg) Hardened Confinement Policy
+const profileTemplate = `;; Airlock Hardened Confinement Policy
 (version 1)
 (deny default)
 

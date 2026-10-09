@@ -13,7 +13,7 @@ func TestProfileGenerator_Generate(t *testing.T) {
 	p := Params{
 		UserHome:      "/Users/testuser",
 		WorkspaceRoot: "/Users/testuser/projects/demo",
-		ScratchDir:    "/tmp/boxpkg-abcdef123456",
+		ScratchDir:    "/tmp/airlock-abcdef123456",
 		ProxyPort:     18443,
 	}
 

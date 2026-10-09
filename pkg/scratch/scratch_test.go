@@ -47,7 +47,7 @@ func TestScavengeOrphans(t *testing.T) {
 	tempBase := t.TempDir()
 
 	// Old orphan (>48h)
-	oldOrphan := filepath.Join(tempBase, "boxpkg-old0123456789")
+	oldOrphan := filepath.Join(tempBase, "airlock-old0123456789")
 	if err := os.Mkdir(oldOrphan, 0700); err != nil {
 		t.Fatalf("Failed to create old orphan: %v", err)
 	}
@@ -55,12 +55,12 @@ func TestScavengeOrphans(t *testing.T) {
 	_ = os.Chtimes(oldOrphan, oldTime, oldTime)
 
 	// Fresh dir (<1h)
-	freshDir := filepath.Join(tempBase, "boxpkg-fresh987654321")
+	freshDir := filepath.Join(tempBase, "airlock-fresh987654321")
 	if err := os.Mkdir(freshDir, 0700); err != nil {
 		t.Fatalf("Failed to create fresh dir: %v", err)
 	}
 
-	// Non-boxpkg dir
+	// Non-airlock dir
 	otherDir := filepath.Join(tempBase, "other-data")
 	if err := os.Mkdir(otherDir, 0700); err != nil {
 		t.Fatalf("Failed to create other dir: %v", err)

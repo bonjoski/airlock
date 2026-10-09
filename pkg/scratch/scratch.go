@@ -59,7 +59,7 @@ func New(baseDir string) (*DefaultManager, error) {
 		return nil, fmt.Errorf("scratch: failed to generate random token: %w", err)
 	}
 
-	dirName := "boxpkg-" + hex.EncodeToString(tokenBytes)
+	dirName := "airlock-" + hex.EncodeToString(tokenBytes)
 	rootDir := filepath.Join(baseDir, dirName)
 
 	// Enforce private 0700 permissions: accessible only by current user
@@ -113,7 +113,7 @@ func (m *DefaultManager) Cleanup() error {
 	return os.RemoveAll(m.root)
 }
 
-// ScavengeOrphans purges abandoned boxpkg-* directories older than maxAge.
+// ScavengeOrphans purges abandoned airlock-* directories older than maxAge.
 // Mitigates disk exhaustion from SIGKILL, OOM killer, or crashes (V-11).
 func ScavengeOrphans(baseDir string, maxAge time.Duration) (int, error) {
 	if baseDir == "" {
@@ -137,7 +137,7 @@ func ScavengeOrphans(baseDir string, maxAge time.Duration) (int, error) {
 			continue
 		}
 		name := entry.Name()
-		if !strings.HasPrefix(name, "boxpkg-") {
+		if !strings.HasPrefix(name, "airlock-") {
 			continue
 		}
 

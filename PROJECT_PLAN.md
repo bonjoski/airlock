@@ -1,4 +1,4 @@
-# Airlock (`boxpkg`) — Hardened Engineering Specification & Master Project Plan
+# Airlock — Hardened Engineering Specification & Master Project Plan
 
 > **Minimalist Workstation Sandbox for Untrusted Package Installs & Agentic Loops**  
 > *Target Startup Latency: <15ms | Footprint: Zero-VM / Zero-Daemon | Platform: macOS & Linux*  
@@ -15,11 +15,11 @@ Following an extensive adversarial security assessment ([adversarial_audit_repor
 
 ```mermaid
 flowchart TD
-    CLI["boxpkg Supervisor Process (Go / Rust)"] --> PTY["1. Allocate Dedicated PTY Pair<br/>(Neutralizes TIOCSTI ioctl escapes)"]
+    CLI["airlock Supervisor Process (Go / Rust)"] --> PTY["1. Allocate Dedicated PTY Pair<br/>(Neutralizes TIOCSTI ioctl escapes)"]
     PTY --> ENV["2. Apply Strict POSIX Allowlist<br/>(Drop DATABASE_URL, cloud credentials, tokens)"]
     ENV --> PROXY["3. Launch Ephemeral Forward Proxy<br/>(Supervisor TLS SNI inspection on 127.0.0.1:port)"]
     PROXY --> CACHE["4. Bind Host Cache as READ-ONLY<br/>(~/.npm, ~/.cache/pip, ~/.cargo + staging overlay)"]
-    CACHE --> SCRATCH["5. Allocate mkdtemp Scratch Directory<br/>(/tmp/boxpkg-XXXXXXXXXXXX with 0700 permissions)"]
+    CACHE --> SCRATCH["5. Allocate mkdtemp Scratch Directory<br/>(/tmp/airlock-XXXXXXXXXXXX with 0700 permissions)"]
     
     SCRATCH --> OS{Host Platform}
     
@@ -49,7 +49,7 @@ Every vulnerability identified in the [Adversarial Security Audit](file:///Users
 | **V-08** | **DNS Tunneling Exfiltration** | **HIGH** | Port 53 outbound permitted without inspection; data exfiltrated via chunked subdomain lookups. | Block raw port 53 outbound. All domain resolution is handled internally by the supervisor forward proxy. |
 | **V-09** | **Linux Kernel Attack Surface** | **MEDIUM** | `io_uring` enables kernel privilege escalation; abstract sockets (`@X11`, `@dbus`) bypass filesystem boundaries. | Block `io_uring_*` in Seccomp-BPF; enforce `CLONE_NEWNET` unconditionally to isolate abstract Unix domain sockets. |
 | **V-10** | **Incomplete Mach IPC Denial** | **MEDIUM** | Omission of `launchservicesd`, `pasteboard`, and `tccd` enables spawning host apps, clipboard theft, and TCC bypass. | Deny Mach lookups to `launchservicesd`, `pasteboard`, `tccd`, and mask `/private/tmp/com.apple.launchd.*/Listeners` (ssh-agent). |
-| **V-11** | **Insecure Ephemeral Scratch & Disk DoS** | **MEDIUM** | Predictable PID naming (`/tmp/boxpkg-<pid>`) causes symlink races (CWE-377); `SIGKILL` leaks gigabytes of build artifacts. | Cryptographic `mkdtemp` (`/tmp/boxpkg-XXXXXXXXXXXX`); CLI startup scavenger purges abandoned scratch folders > 24 hours old. |
+| **V-11** | **Insecure Ephemeral Scratch & Disk DoS** | **MEDIUM** | Predictable PID naming (`/tmp/airlock-<pid>`) causes symlink races (CWE-377); `SIGKILL` leaks gigabytes of build artifacts. | Cryptographic `mkdtemp` (`/tmp/airlock-XXXXXXXXXXXX`); CLI startup scavenger purges abandoned scratch folders > 24 hours old. |
 | **V-12** | **The "Cold Cache" Disaster** | **OPERATIONAL** | Destroying cache directories on exit turns 3s installs into 90s downloads, destroying developer adoption. | Mount host caches (`~/.npm`, `~/.cache/pip`, `~/.cargo/registry`) as **Read-Only** with an ephemeral write-staging layer. |
 
 ---
@@ -68,7 +68,7 @@ Every vulnerability identified in the [Adversarial Security Audit](file:///Users
 | **Docker Daemon Socket** | **BLOCKED (DENY)** | **BLOCKED (V-06):** Explicit denial of `/var/run/docker.sock` to prevent trivial root container escapes. |
 | **System Toolchains (`/usr`, `/bin`, `/lib`, `/opt`)** | **Read-Only** | Compilers, runtimes, and libraries execute without modification rights. |
 | **Host Package Caches (`~/.npm`, `~/.cache/pip`)** | **Read-Only Host Mount** | **RESOLVED (V-12):** Preserves instant build times (<15ms overhead). New downloads land in ephemeral staging layer. |
-| **Ephemeral Scratch Space** | **Read-Write (0700)** | **RESOLVED (V-11):** Cryptographic `mkdtemp` (`/tmp/boxpkg-XXXXXXXXXXXX`). Startup GC purges abandoned folders > 24h. |
+| **Ephemeral Scratch Space** | **Read-Write (0700)** | **RESOLVED (V-11):** Cryptographic `mkdtemp` (`/tmp/airlock-XXXXXXXXXXXX`). Startup GC purges abandoned folders > 24h. |
 | **Kernel Subsystems (`io_uring`, `bpf`, `keyctl`)** | **BLOCKED (DENY)** | **BLOCKED (V-09):** Blocked via Seccomp-BPF on Linux to prevent privilege escalation and sandbox escapes. |
 | **Abstract Unix Domain Sockets** | **BLOCKED (DENY)** | **BLOCKED (V-09):** Unconditional `CLONE_NEWNET` network namespace detachment isolates `@X11` and `@dbus`. |
 | **Terminal Descriptors (`stdin`/`stdout`)** | **Isolated PTY** | **RESOLVED (V-05):** Allocates dedicated pseudo-terminal pair; drops `TIOCSTI` ioctl to prevent keystroke injection into parent shell. |
@@ -81,7 +81,7 @@ Every vulnerability identified in the [Adversarial Security Audit](file:///Users
 ### 4.1 Hardened macOS Seatbelt Profile Template (`pkg/seatbelt/template.sb`)
 
 ```scheme
-;; Airlock (boxpkg) Hardened Confinement Policy
+;; Airlock Hardened Confinement Policy
 (version 1)
 (deny default)
 
@@ -224,7 +224,7 @@ To guarantee that non-airgap runs cannot bypass registry restrictions via raw TC
 
 To avoid transforming a 3-second install into a 90-second cold network fetch:
 - **Read-Only Host Mount:** Airlock mounts the host's existing package caches (`~/.npm`, `~/.cache/pip`, `~/.cargo/registry`) as **Read-Only** inside the sandbox.
-- **Staging Layer for Writes:** Package managers write new packages to an isolated staging directory within the scratch space (`/tmp/boxpkg-XXXXXXXXXXXX/cache-staging`).
+- **Staging Layer for Writes:** Package managers write new packages to an isolated staging directory within the scratch space (`/tmp/airlock-XXXXXXXXXXXX/cache-staging`).
 - **Post-Exec Validation:** Upon successful process exit (code 0) without policy violations, newly cached tarballs/wheels in the staging layer are validated (hash integrity verification) and synced back to the host cache.
 
 ### 4.5 PTY Isolation & Terminal Escape Prevention
@@ -252,7 +252,7 @@ To defeat `TIOCSTI` terminal queue injection:
 ### 5.1 Nested Execution Sentinel (`__AIRLOCK_ACTIVE`)
 Autonomous agents often run complex scripts that invoke sub-tools (e.g. `npm run test` -> `npx tsx` -> `node`).
 - When launching a sandboxed process, Airlock exports `__AIRLOCK_ACTIVE=1`.
-- Any toolchain shim (`boxpkg shim npm`) checks for `__AIRLOCK_ACTIVE=1`. If detected, it bypasses re-sandboxing and executes directly via `execvp`, preventing nested sandbox failures and `EPERM` crashes on macOS.
+- Any toolchain shim (`airlock shim npm`) checks for `__AIRLOCK_ACTIVE=1`. If detected, it bypasses re-sandboxing and executes directly via `execvp`, preventing nested sandbox failures and `EPERM` crashes on macOS.
 
 ### 5.2 Non-Interactive Pipe Handling (`isatty`)
 - Airlock inspects `isatty(STDIN_FILENO)`.
@@ -288,12 +288,12 @@ gantt
 
 ### Phase 1: Confinement Primitives & Workspace Isolation (Weeks 1–3) — ✅ COMPLETED
 - **Weeks 1–2: Dynamic SBPL Synthesis & Environment Allowlist**
-  - [x] Implement CLI scaffolding in 100% Go (`cmd/airlock/main.go` with `boxpkg` legacy alias).
+  - [x] Implement CLI scaffolding in 100% Go (`cmd/airlock/main.go`).
   - [x] Dynamic Seatbelt Scheme (`.sb`) profile generation with absolute evaluated paths (`{{.UserHome}}/.ssh`, etc.) and regex fallbacks (`pkg/seatbelt/generator.go`).
   - [x] Mach IPC denial rules: `securityd`, `launchservicesd`, `pasteboard`, `tccd` (V-10).
   - [x] Masking `/private/tmp/com.apple.launchd.*/Listeners` and `/var/run/docker.sock` (V-06, V-10).
   - [x] Strict POSIX environment allowlist engine with PATH sanitization (`pkg/env/sanitizer.go`).
-  - [x] Ephemeral scratch manager using cryptographic `mkdtemp` (`/tmp/boxpkg-XXXXXXXXXXXX`) and startup scavenger for dirs > 24h (`pkg/scratch/manager.go`, V-11).
+  - [x] Ephemeral scratch manager using cryptographic `mkdtemp` (`/tmp/airlock-XXXXXXXXXXXX`) and startup scavenger for dirs > 24h (`pkg/scratch/manager.go`, V-11).
 - **Week 3: Workspace Protection & PTY Isolation**
   - [x] Enforce `.git` write protection (`(deny file-write* (subpath "{{.WorkspaceRoot}}/.git"))`, V-03).
   - [x] Enforce workspace secret read denial (`.env*`, `*.pem`, `id_*`, `secrets.json`, V-04).
@@ -312,7 +312,7 @@ gantt
   - [x] Fail-closed verification on hardened distros (Ubuntu 24.04 AppArmor profiles, V-07).
 - **Weeks 6–7: Read-Only Host Cache Architecture & Staging Layer**
   - [x] Mount host package caches (`~/.npm`, `~/.cache/pip`, `~/.cargo/registry`, `~/.cache/uv`) as **Read-Only** inside sandbox (`pkg/cache/`, V-12).
-  - [x] Ephemeral staging write-layer (`/tmp/boxpkg-XXXXXXXXXXXX/cache-staging`).
+  - [x] Ephemeral staging write-layer (`/tmp/airlock-XXXXXXXXXXXX/cache-staging`).
   - [x] Post-execution hash validation and background cache sync back to host cache.
   - [x] Benchmarking repeat install times to ensure parity with unconfined warm installs (< 3s).
 

@@ -3,18 +3,18 @@
 
 SHELL := /bin/bash
 BINARY_NAME := airlock
-LEGACY_ALIAS := boxpkg
 BIN_DIR := bin
 DIST_DIR := dist
 MAIN_PKG := ./cmd/airlock
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.5.0")
+VERSION_PKG := github.com/bonjoski/airlock/pkg/version
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.6.0")
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 LDFLAGS := -s -w \
-	-X main.version=$(VERSION) \
-	-X main.commit=$(COMMIT) \
-	-X main.buildTime=$(BUILD_TIME)
+	-X $(VERSION_PKG).Version=$(VERSION) \
+	-X $(VERSION_PKG).Commit=$(COMMIT) \
+	-X $(VERSION_PKG).BuildTime=$(BUILD_TIME)
 
 # Tool paths
 GOLANGCI_LINT := $(shell which golangci-lint 2>/dev/null)
@@ -43,7 +43,6 @@ build: ## Build the optimized release binary in ./bin/airlock and bin/airlock-mc
 	@mkdir -p $(BIN_DIR)
 	@echo "==> Building $(BINARY_NAME) $(VERSION)..."
 	go build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY_NAME) $(MAIN_PKG)
-	@ln -sf $(BINARY_NAME) $(BIN_DIR)/$(LEGACY_ALIAS)
 	@echo "==> Building airlock-mcp $(VERSION)..."
 	go build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/airlock-mcp ./cmd/airlock-mcp
 	@echo "==> Binaries built: $(BIN_DIR)/$(BINARY_NAME), $(BIN_DIR)/airlock-mcp"
@@ -96,7 +95,6 @@ package: cross-compile ## Package release archives and generate sha256 checksums
 		mkdir -p $$tar_dir; \
 		cp $(DIST_DIR)/$(BINARY_NAME)_$$target $$tar_dir/$(BINARY_NAME); \
 		cp $(DIST_DIR)/airlock-mcp_$$target $$tar_dir/airlock-mcp; \
-		ln -sf $(BINARY_NAME) $$tar_dir/$(LEGACY_ALIAS); \
 		[ -f README.md ] && cp README.md $$tar_dir/ || true; \
 		[ -f LICENSE ] && cp LICENSE $$tar_dir/ || true; \
 		tar -czf $(DIST_DIR)/$(BINARY_NAME)_$${target}.tar.gz -C $$tar_dir .; \
@@ -108,7 +106,6 @@ package: cross-compile ## Package release archives and generate sha256 checksums
 		mkdir -p $$zip_dir; \
 		cp $(DIST_DIR)/$(BINARY_NAME)_$${target}.exe $$zip_dir/$(BINARY_NAME).exe; \
 		cp $(DIST_DIR)/airlock-mcp_$${target}.exe $$zip_dir/airlock-mcp.exe; \
-		cp $(DIST_DIR)/$(BINARY_NAME)_$${target}.exe $$zip_dir/$(LEGACY_ALIAS).exe; \
 		[ -f README.md ] && cp README.md $$zip_dir/ || true; \
 		[ -f LICENSE ] && cp LICENSE $$zip_dir/ || true; \
 		(cd $$zip_dir && zip -q -r ../$(BINARY_NAME)_$${target}.zip .); \

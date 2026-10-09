@@ -8,14 +8,11 @@ import (
 	"os"
 
 	"github.com/bonjoski/airlock/pkg/mcp"
-)
-
-var (
-	version = "0.5.0"
+	"github.com/bonjoski/airlock/pkg/version"
 )
 
 func main() {
-	server := mcp.NewServer(os.Stdin, os.Stdout, mcp.WithVersion(version))
+	server := mcp.NewServer(os.Stdin, os.Stdout, mcp.WithVersion(version.Version))
 	if err := server.Serve(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "airlock-mcp: server error: %v\n", err)
 		os.Exit(1)
