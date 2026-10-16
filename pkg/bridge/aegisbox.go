@@ -26,9 +26,9 @@ func DiscoverAegisbox() (string, error) {
 	}
 
 	candidates := []string{
-		"/Users/benskolmoski/code/aegisbox/bin/aegisbox",
 		"/usr/local/bin/aegisbox",
 		"/opt/homebrew/bin/aegisbox",
+		filepath.Join(os.Getenv("HOME"), ".local", "bin", "aegisbox"),
 		filepath.Join(os.Getenv("HOME"), "bin", "aegisbox"),
 		filepath.Join(os.Getenv("HOME"), "go", "bin", "aegisbox"),
 	}
