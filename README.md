@@ -120,7 +120,8 @@ curl -fsSL https://raw.githubusercontent.com/bonjoski/airlock/main/install.sh | 
 
 #### Option B: Homebrew (macOS & Linux)
 ```bash
-brew install bonjoski/airlock/airlock
+brew tap bonjoski/tap
+brew install airlock
 ```
 
 #### Option C: Go Install
