@@ -10,6 +10,9 @@ import (
 )
 
 func TestDiscoverAegisbox_EnvOverride(t *testing.T) {
+	if os.Getenv("OS") == "Windows_NT" || os.PathSeparator == '\\' {
+		t.Skip("Aegisbox microVM bridge is Unix-only (macOS Apple VZ / Linux KVM)")
+	}
 	tmpDir := t.TempDir()
 	fakeBin := filepath.Join(tmpDir, "fake-aegisbox")
 	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\necho fake\n"), 0755); err != nil {
@@ -31,6 +34,9 @@ func TestDiscoverAegisbox_EnvOverride(t *testing.T) {
 }
 
 func TestExecuteMicroVM_FakeBinary(t *testing.T) {
+	if os.Getenv("OS") == "Windows_NT" || os.PathSeparator == '\\' {
+		t.Skip("Aegisbox microVM bridge is Unix-only (macOS Apple VZ / Linux KVM)")
+	}
 	tmpDir := t.TempDir()
 	fakeBin := filepath.Join(tmpDir, "fake-aegisbox-runner")
 	// Script that outputs args to stdout
