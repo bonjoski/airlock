@@ -79,8 +79,6 @@ func (l *ArgusStreamLogger) streamWorker() {
 
 	for {
 		select {
-		case <-l.stopCh:
-			return
 		case data := <-l.ch:
 			if conn == nil {
 				conn = dial()
@@ -90,6 +88,25 @@ func (l *ArgusStreamLogger) streamWorker() {
 				if _, err := conn.Write(append(data, '\n')); err != nil {
 					_ = conn.Close()
 					conn = nil
+				}
+			}
+		case <-l.stopCh:
+			// Drain remaining queue before closing connection and exiting
+			for {
+				select {
+				case data := <-l.ch:
+					if conn == nil {
+						conn = dial()
+					}
+					if conn != nil {
+						_ = conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
+						if _, err := conn.Write(append(data, '\n')); err != nil {
+							_ = conn.Close()
+							conn = nil
+						}
+					}
+				default:
+					return
 				}
 			}
 		}

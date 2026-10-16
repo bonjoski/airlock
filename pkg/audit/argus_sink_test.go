@@ -10,6 +10,10 @@ import (
 )
 
 func TestArgusStreamLogger_Integration(t *testing.T) {
+	if os.Getenv("OS") == "Windows_NT" || os.PathSeparator == '\\' {
+		t.Skip("Unix domain sockets not supported on Windows in this test")
+	}
+
 	fakeSocket := fmt.Sprintf("/tmp/fake-argus-%d-%d.sock", os.Getpid(), time.Now().UnixNano()%10000)
 	defer os.Remove(fakeSocket)
 
@@ -19,7 +23,7 @@ func TestArgusStreamLogger_Integration(t *testing.T) {
 	}
 	defer l.Close()
 
-	receivedEvents := make(chan string, 5)
+	receivedEvents := make(chan string, 10)
 	done := make(chan struct{})
 
 	go func() {
@@ -51,9 +55,14 @@ func TestArgusStreamLogger_Integration(t *testing.T) {
 	_ = streamer.LogNetwork(NetworkRecord{Host: "api.openai.com", Action: "ALLOW"})
 	_ = streamer.LogSecurity(SecurityRecord{Category: "syscall.violation", Details: "open ~/.ssh/id_rsa denied"})
 
-	// Give time to flush over socket
-	time.Sleep(100 * time.Millisecond)
+	// Close streamer to send EOF
 	_ = streamer.Close()
+
+	// Wait for server goroutine to finish reading until EOF
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+	}
 
 	foundSec := false
 	foundExec := false

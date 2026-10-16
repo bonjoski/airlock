@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/bonjoski/airlock/pkg/protocol"
@@ -166,7 +165,7 @@ func (c *LocksmithClient) CreateSession(ctx context.Context, ttl time.Duration, 
 
 	payload := map[string]any{
 		"action":          protocol.ActionCreateSession,
-		"pgid":            syscall.Getpgrp(),
+		"pgid":            getProcessGroupID(),
 		"ttl":             ttl,
 		"allowed_secrets": allowedSecrets,
 	}
