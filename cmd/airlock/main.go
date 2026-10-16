@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bonjoski/airlock/pkg/audit"
+	"github.com/bonjoski/airlock/pkg/bridge"
 	"github.com/bonjoski/airlock/pkg/config"
 	"github.com/bonjoski/airlock/pkg/interactive"
 	"github.com/bonjoski/airlock/pkg/mcp"
@@ -61,7 +62,7 @@ func main() {
 	case "mcp":
 		handleMCP(os.Args[2:])
 		os.Exit(0)
-	case "run":
+	case "run", "exec":
 		handleRun(os.Args[2:])
 	default:
 		// Direct shorthand: airlock npm install, airlock pip install, etc.
@@ -80,6 +81,7 @@ func printUsage() {
 
 Usage:
   airlock run [flags] -- <command> [args...]
+  airlock exec [flags] -- <command> [args...]
   airlock <command> [args...]
   airlock vet [--strict] [--workspace <path>] [--json] [-- <command>]
   airlock init [--type <node|python|rust|go>]
@@ -92,6 +94,10 @@ Usage:
   airlock version
 
 Flags:
+  --profile <name>      Execution profile (agent, strict, airgap, default)
+  --microvm             Tier 2 Confinement via Aegisbox hypervisor MicroVM
+  --lease-secret <keys> Comma-separated secrets to lease dynamically via Locksmith
+  --session-ticket <tk> Session ticket for autonomous agent batch loops
   --config <path>       Path to custom airlock.yaml declarative policy file
   --airgap              Total offline isolation (denies all outbound network traffic)
   --net                 Permit direct external outbound networking (development mode)
@@ -213,9 +219,17 @@ func handleRun(args []string) {
 		nonInteractive bool
 		workspace      string
 		scratchBase    string
+		profileName    string
+		microvm        bool
+		leaseSecrets   string
+		sessionTicket  string
 	)
 
 	fs.StringVar(&configPath, "config", "", "Path to declarative policy file")
+	fs.StringVar(&profileName, "profile", "", "Execution profile: agent, strict, airgap, default")
+	fs.BoolVar(&microvm, "microvm", false, "Tier 2 hypervisor MicroVM isolation via Aegisbox")
+	fs.StringVar(&leaseSecrets, "lease-secret", "", "Comma-separated secrets to lease via Locksmith")
+	fs.StringVar(&sessionTicket, "session-ticket", "", "Session ticket for batch agent sub-commands")
 	fs.BoolVar(&airgap, "airgap", false, "Offline isolation")
 	fs.BoolVar(&allowDirectNet, "net", false, "Permit direct external network")
 	fs.StringVar(&allowDomains, "allow-domain", "", "Additional registry domains")
@@ -275,21 +289,43 @@ func handleRun(args []string) {
 		}
 	}
 
-	// 2. Discover & Load Declarative Policy (airlock.yaml)
+	// 2. Discover & Load Declarative Policy (airlock.yaml) or Profile
 	var loadedCfg *config.Config
 	var discoveredConfigPath string
+
+	if profileName != "" {
+		prof, err := config.GetBuiltinProfile(profileName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "airlock: %v\n", err)
+			os.Exit(1)
+		}
+		loadedCfg = prof
+		// If profile is agent and no secrets explicitly specified, auto-lease common agent credentials
+		if strings.EqualFold(profileName, config.ProfileAgent) && leaseSecrets == "" {
+			leaseSecrets = strings.Join(config.AgentDefaultSecrets, ",")
+		}
+	}
+
 	if configPath != "" {
 		cfg, err := config.LoadFromFile(configPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "airlock: error loading config %q: %v\n", configPath, err)
 			os.Exit(1)
 		}
-		loadedCfg = cfg
+		if loadedCfg != nil {
+			loadedCfg = config.MergeProfiles(loadedCfg, cfg)
+		} else {
+			loadedCfg = cfg
+		}
 		discoveredConfigPath = configPath
 	} else {
 		p, cfg, err := config.DiscoverConfig(resolvedWorkspace)
 		if err == nil && cfg != nil {
-			loadedCfg = cfg
+			if loadedCfg != nil {
+				loadedCfg = config.MergeProfiles(loadedCfg, cfg)
+			} else {
+				loadedCfg = cfg
+			}
 			discoveredConfigPath = p
 		}
 	}
@@ -356,9 +392,14 @@ func handleRun(args []string) {
 		defer func() { _ = auditLogger.Close() }()
 	}
 
-	var effectiveLogger audit.Logger = &audit.NopLogger{}
+	argusLogger := audit.NewArgusStreamLogger("")
+	defer func() { _ = argusLogger.Close() }()
+
+	var effectiveLogger audit.Logger
 	if auditLogger != nil {
-		effectiveLogger = auditLogger
+		effectiveLogger = audit.NewMultiLogger(auditLogger, argusLogger)
+	} else {
+		effectiveLogger = argusLogger
 	}
 
 	// 4. Configure Dynamic Capability Prompter for interactive sessions
@@ -375,6 +416,15 @@ func handleRun(args []string) {
 	defer func() { _ = redactingStdout.Close() }()
 	redactingStderr := redact.NewWriter(os.Stderr)
 	defer func() { _ = redactingStderr.Close() }()
+
+	var secretsToLease []string
+	if leaseSecrets != "" {
+		for _, s := range strings.Split(leaseSecrets, ",") {
+			if trimmed := strings.TrimSpace(s); trimmed != "" {
+				secretsToLease = append(secretsToLease, trimmed)
+			}
+		}
+	}
 
 	opts := sandbox.Options{
 		WorkspaceRoot:   resolvedWorkspace,
@@ -396,20 +446,29 @@ func handleRun(args []string) {
 		VetTool:         vetTool,
 		IgnoredVetRules: ignoredVetRules,
 		PromptHandler:   promptHandler,
+		LeasedSecrets:   secretsToLease,
+		SessionTicket:   sessionTicket,
 		Stdout:          redactingStdout,
 		Stderr:          redactingStderr,
 		Stdin:           os.Stdin,
 	}
 
-	engine, err := sandbox.NewEngine(opts)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "airlock: initialization error: %v\n", err)
-		os.Exit(1)
-	}
-
 	ctx := context.Background()
 	start := time.Now()
-	exitCode, err := engine.Execute(ctx, cmdArgs)
+	var exitCode int
+	var err error
+
+	if microvm {
+		exitCode, err = bridge.ExecuteMicroVM(ctx, opts, cmdArgs)
+	} else {
+		var engine sandbox.Engine
+		engine, err = sandbox.NewEngine(opts)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "airlock: initialization error: %v\n", err)
+			os.Exit(1)
+		}
+		exitCode, err = engine.Execute(ctx, cmdArgs)
+	}
 
 	_ = effectiveLogger.LogExecution(audit.ExecutionRecord{
 		Command:        cmdArgs[0],

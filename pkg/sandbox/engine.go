@@ -37,6 +37,9 @@ type Options struct {
 	IgnoredVetRules []string            // Argus rule IDs to ignore
 	Inspector       vet.Inspector       // Injected inspector interface
 	PromptHandler   proxy.PromptHandler // Dynamic capability prompter
+	LeasedSecrets   []string            // Secret keys to dynamically lease via Locksmith ETX
+	LocksmithSocket string              // Explicit Locksmith socket path (optional)
+	SessionTicket   string              // Optional session ticket for batch execution
 	Stdout          io.Writer
 	Stderr          io.Writer
 	Stdin           io.Reader

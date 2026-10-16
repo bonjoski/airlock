@@ -17,6 +17,7 @@ import (
 	"github.com/bonjoski/airlock/pkg/pty"
 	"github.com/bonjoski/airlock/pkg/scratch"
 	"github.com/bonjoski/airlock/pkg/seatbelt"
+	"github.com/bonjoski/airlock/pkg/secrets"
 	"github.com/bonjoski/airlock/pkg/vet"
 )
 
@@ -165,6 +166,19 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 
 	sanitizer := env.NewSanitizer(envConfig)
 	sanitizedEnv := sanitizer.Sanitize(os.Environ())
+
+	// 6b. Ephemeral Secret Leasing (ETX / Locksmith Integration)
+	if len(m.opts.LeasedSecrets) > 0 {
+		lsClient := secrets.NewLocksmithClient(m.opts.LocksmithSocket)
+		for _, secretName := range m.opts.LeasedSecrets {
+			resp, cleanup, leaseErr := lsClient.RequestLease(ctx, secretName, 5*time.Minute, m.opts.SessionTicket)
+			if leaseErr != nil {
+				return 1, fmt.Errorf("sandbox: failed to lease secret %q from Locksmith: %w", secretName, leaseErr)
+			}
+			defer cleanup()
+			sanitizedEnv = append(sanitizedEnv, fmt.Sprintf("%s=%s", secretName, string(resp.SecretValue)))
+		}
+	}
 
 	// 7. Assemble Command Execution via sandbox-exec
 	execArgs := append([]string{"-p", profileStr}, cmdArgs...)
