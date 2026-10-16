@@ -6,6 +6,9 @@ import (
 )
 
 func TestCheckTIOCSTI_NonTerminalFile(t *testing.T) {
+	if os.Getenv("OS") == "Windows_NT" || os.PathSeparator == '\\' {
+		t.Skip("TIOCSTI ioctl is a Unix-specific vector, skipped on Windows")
+	}
 	// On a regular temporary file (not a TTY), ioctl with TIOCSTI MUST fail with ENOTTY
 	tmp, err := os.CreateTemp("", "tiocsti-test")
 	if err != nil {
@@ -22,6 +25,9 @@ func TestCheckTIOCSTI_NonTerminalFile(t *testing.T) {
 }
 
 func TestCheckTIOCSTI_NilFile(t *testing.T) {
+	if os.Getenv("OS") == "Windows_NT" || os.PathSeparator == '\\' {
+		t.Skip("TIOCSTI ioctl is a Unix-specific vector, skipped on Windows")
+	}
 	err := CheckTIOCSTI(nil)
 	if err == nil {
 		t.Fatal("expected error on nil file, got nil")

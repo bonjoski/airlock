@@ -13,6 +13,9 @@ import (
 )
 
 func startMockLocksmithDaemon(t *testing.T, secrets map[string][]byte) (string, func()) {
+	if os.Getenv("OS") == "Windows_NT" || os.PathSeparator == '\\' {
+		t.Skip("Unix domain sockets not supported on Windows in this test")
+	}
 	sockPath := fmt.Sprintf("/tmp/airlock-ls-test-%d-%d.sock", os.Getpid(), time.Now().UnixNano()%10000)
 	l, err := net.Listen("unix", sockPath)
 	if err != nil {

@@ -86,6 +86,9 @@ func TestAdversarial_MicroVMMissingBinaryFailClosed(t *testing.T) {
 
 // ADV-P3-04: TIOCSTI Subshell Injection Probe (V-05)
 func TestAdversarial_TIOCSTIInjectionMitigation(t *testing.T) {
+	if os.Getenv("OS") == "Windows_NT" || os.PathSeparator == '\\' {
+		t.Skip("TIOCSTI ioctl is a Unix-specific vector, skipped on Windows")
+	}
 	tmp, err := os.CreateTemp("", "tiocsti-adv")
 	if err != nil {
 		t.Fatalf("temp file error: %v", err)
