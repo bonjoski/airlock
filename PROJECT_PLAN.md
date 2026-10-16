@@ -3,7 +3,7 @@
 > **Minimalist Workstation Sandbox for Untrusted Package Installs & Agentic Loops**  
 > *Target Startup Latency: <15ms | Footprint: Zero-VM / Zero-Daemon | Platform: macOS & Linux*  
 > *Security Posture: Hardened Post-Audit Architecture (Zero Trust / Fail-Closed)*  
-> *Audit Reference:* [Adversarial Third-Party Security & Architectural Audit](file:///Users/benskolmoski/.gemini/antigravity-cli/brain/40237b3c-cd6b-4f1b-8098-1f15bed28e3c/adversarial_audit_report.md)
+> *Audit Reference:* [Adversarial Third-Party Security & Architectural Audit](docs/adversarial_audit_report.md)
 
 ---
 
@@ -11,7 +11,7 @@
 
 Modern package managers (`npm`, `pnpm`, `yarn`, `pip`, `cargo`, `gem`, `bun`) allow arbitrary code execution during build and installation cycles via lifecycle hooks (`preinstall`, `postinstall`, `setup.py`, `build.rs`). Concurrently, autonomous AI coding agents execute shell loops and install packages directly on developer workstations.
 
-Following an extensive adversarial security assessment ([adversarial_audit_report.md](file:///Users/benskolmoski/.gemini/antigravity-cli/brain/40237b3c-cd6b-4f1b-8098-1f15bed28e3c/adversarial_audit_report.md)), Airlock's architecture is engineered around **Zero Trust and Fail-Closed primitives**. Untrusted package installation routines cannot be assumed to respect advisory environment variables (`HTTP_PROXY`), remain benign within the workspace, or refrain from kernel-level escapes.
+Following an extensive adversarial security assessment ([adversarial_audit_report.md](docs/adversarial_audit_report.md)), Airlock's architecture is engineered around **Zero Trust and Fail-Closed primitives**. Untrusted package installation routines cannot be assumed to respect advisory environment variables (`HTTP_PROXY`), remain benign within the workspace, or refrain from kernel-level escapes.
 
 ```mermaid
 flowchart TD
@@ -35,7 +35,7 @@ flowchart TD
 
 ## 2. Threat Matrix & Audit Remediation Index
 
-Every vulnerability identified in the [Adversarial Security Audit](file:///Users/benskolmoski/.gemini/antigravity-cli/brain/40237b3c-cd6b-4f1b-8098-1f15bed28e3c/adversarial_audit_report.md) has an assigned architectural remediation:
+Every vulnerability identified in the [Adversarial Security Audit](docs/adversarial_audit_report.md) has an assigned architectural remediation:
 
 | Ref | Vulnerability / Design Flaw | Severity | Root Cause in Naive Sandboxing | Hardened Architectural Remediation |
 | :--- | :--- | :---: | :--- | :--- |
@@ -269,7 +269,7 @@ Autonomous agents often run complex scripts that invoke sub-tools (e.g. `npm run
 
 ## 6. Revised 12-Week Implementation Roadmap
 
-In full alignment with the [Auditor's Roadmap Recommendation](file:///Users/benskolmoski/.gemini/antigravity-cli/brain/40237b3c-cd6b-4f1b-8098-1f15bed28e3c/adversarial_audit_report.md#L398-L426), the engineering schedule is recalibrated to **12 weeks across 3 execution phases**:
+In full alignment with the [Auditor's Roadmap Recommendation](docs/adversarial_audit_report.md#L398-L426), the engineering schedule is recalibrated to **12 weeks across 3 execution phases**:
 
 ```mermaid
 gantt
