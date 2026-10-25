@@ -27,19 +27,38 @@ var SafeEnvAllowlist = map[string]bool{
 	"DEBIAN_FRONTEND": true,
 	"SSL_CERT_FILE":   true,
 	"SSL_CERT_DIR":    true,
-	"GODEBUG":         true,
-	"GOROOT":          true,
-	"GOPATH":          true,
-	"GOCACHE":         true,
-	"GOMODCACHE":      true,
-	"GOPROXY":         true,
-	"GONOSUMDB":       true,
-	"GOPRIVATE":       true,
-	"CARGO_HOME":      true,
-	"RUSTUP_HOME":     true,
-	"NODE_PATH":       true,
-	"PYTHONPATH":      true,
-	"UV_CACHE_DIR":    true,
+	// Modern Language Runtimes: Go
+	"GODEBUG":     true,
+	"GOROOT":      true,
+	"GOPATH":      true,
+	"GOCACHE":     true,
+	"GOMODCACHE":  true,
+	"GOPROXY":     true,
+	"GONOSUMDB":   true,
+	"GOPRIVATE":   true,
+	"CGO_ENABLED": true,
+	"GOOS":        true,
+	"GOARCH":      true,
+	"GOFLAGS":     true,
+
+	// Modern Language Runtimes: Rust
+	"CARGO_HOME":       true,
+	"RUSTUP_HOME":      true,
+	"RUST_LOG":         true,
+	"RUST_BACKTRACE":   true,
+	"CARGO_TARGET_DIR": true,
+
+	// Modern Language Runtimes: Node / JavaScript
+	"NODE_PATH":           true,
+	"NODE_ENV":            true,
+	"NPM_CONFIG_REGISTRY": true,
+
+	// Modern Language Runtimes: Python
+	"PYTHONPATH":              true,
+	"PYTHONUNBUFFERED":        true,
+	"PYTHONDONTWRITEBYTECODE": true,
+	"PIP_INDEX_URL":           true,
+	"UV_CACHE_DIR":            true,
 
 	// Windows NT System Environment Variables
 	"SYSTEMROOT":              true,
@@ -172,6 +191,8 @@ func (s *DefaultSanitizer) Sanitize(hostEnv []string) []string {
 			"PIP_CACHE_DIR="+filepath.Join(s.config.StagingCache, "pip"),
 			"UV_CACHE_DIR="+filepath.Join(s.config.StagingCache, "uv"),
 			"CARGO_TARGET_DIR="+filepath.Join(s.config.StagingCache, "cargo-target"),
+			"GOCACHE="+filepath.Join(s.config.StagingCache, "go-build"),
+			"GOMODCACHE="+filepath.Join(s.config.StagingCache, "go-mod"),
 		)
 	}
 

@@ -7,11 +7,38 @@ import (
 
 // Standard Profile Names
 const (
-	ProfileAgent   = "agent"
-	ProfileDefault = "default"
-	ProfileStrict  = "strict"
-	ProfileAirgap  = "airgap"
+	ProfileStandard = "standard"
+	ProfileAgent    = "agent"
+	ProfileDefault  = "default"
+	ProfileStrict   = "strict"
+	ProfileAirgap   = "airgap"
 )
+
+// StandardDefaultAllowDomains lists the essential registries and code repositories
+// required for modern language runtimes (Go, Rust, Node, Python).
+var StandardDefaultAllowDomains = []string{
+	// Go
+	"proxy.golang.org",
+	"sum.golang.org",
+	"pkg.go.dev",
+	// Rust
+	"crates.io",
+	"static.crates.io",
+	"index.crates.io",
+	// Node
+	"registry.npmjs.org",
+	"registry.yarnpkg.com",
+	// Python
+	"pypi.org",
+	"files.pythonhosted.org",
+	"pypi.python.org",
+	// VCS / GitHub
+	"github.com",
+	"api.github.com",
+	"raw.githubusercontent.com",
+	"objects.githubusercontent.com",
+	"codeload.github.com",
+}
 
 // AgentDefaultAllowDomains lists the essential registries and AI model endpoints
 // required for autonomous coding assistants (Claude Code, Cursor, OpenCode, Aider).
@@ -57,6 +84,32 @@ func GetBuiltinProfile(name string) (*Config, error) {
 	case "", ProfileDefault:
 		return DefaultConfig(), nil
 
+	case ProfileStandard, "standard-local-sandbox", "standard_local_sandbox":
+		cfg := DefaultConfig()
+		cfg.Version = "1"
+		cfg.Mode = ModeStrict
+
+		// 1. Network: Pinned modern language runtimes (Go, Rust, Node, Python) package registries & VCS
+		cfg.Network.Airgap = false
+		cfg.Network.AllowDomains = make([]string, len(StandardDefaultAllowDomains))
+		copy(cfg.Network.AllowDomains, StandardDefaultAllowDomains)
+		cfg.Network.UnknownDomainAction = "refused"
+
+		// 2. Filesystem: Enforce read-only root and block host/workspace secrets
+		cfg.Filesystem.DenyRead = make([]string, len(AgentDefaultDenyPaths))
+		copy(cfg.Filesystem.DenyRead, AgentDefaultDenyPaths)
+		cfg.Filesystem.DenyWrite = append(cfg.Filesystem.DenyRead, ".git")
+
+		// 3. Static Analysis: Argus inspection enabled
+		cfg.Vetting.Enable = true
+		cfg.Vetting.Strict = false
+
+		// 4. Interactive: Non-interactive fail-closed defaults for predictable local sandboxing
+		cfg.Interactive.PromptOnUnknownDomain = false
+		cfg.Interactive.PromptTimeoutSec = 5
+
+		return cfg, nil
+
 	case ProfileStrict:
 		cfg := DefaultConfig()
 		cfg.Mode = ModeStrict
@@ -96,7 +149,7 @@ func GetBuiltinProfile(name string) (*Config, error) {
 		return cfg, nil
 
 	default:
-		return nil, fmt.Errorf("unknown execution profile %q (available: agent, strict, airgap, default)", name)
+		return nil, fmt.Errorf("unknown execution profile %q (available: standard, agent, strict, airgap, default)", name)
 	}
 }
 

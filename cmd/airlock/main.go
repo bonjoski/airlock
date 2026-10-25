@@ -226,7 +226,7 @@ func handleRun(args []string) {
 	)
 
 	fs.StringVar(&configPath, "config", "", "Path to declarative policy file")
-	fs.StringVar(&profileName, "profile", "", "Execution profile: agent, strict, airgap, default")
+	fs.StringVar(&profileName, "profile", "", "Execution profile: standard, agent, strict, airgap, default")
 	fs.BoolVar(&microvm, "microvm", false, "Tier 2 hypervisor MicroVM isolation via Aegisbox")
 	fs.StringVar(&leaseSecrets, "lease-secret", "", "Comma-separated secrets to lease via Locksmith")
 	fs.StringVar(&sessionTicket, "session-ticket", "", "Session ticket for batch agent sub-commands")

@@ -204,6 +204,22 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 		}
 	}
 
+	// Host user runtime toolchains for Go, Rust, Node, Python (Read-Only)
+	if userHome != "" {
+		userToolchains := []string{
+			filepath.Join(userHome, ".cargo", "bin"),
+			filepath.Join(userHome, ".rustup"),
+			filepath.Join(userHome, "go", "bin"),
+			filepath.Join(userHome, ".nvm"),
+			filepath.Join(userHome, ".fnm"),
+			filepath.Join(userHome, ".pyenv"),
+			filepath.Join(userHome, ".local", "bin"),
+		}
+		for _, tc := range userToolchains {
+			args = append(args, "--dir", tc, "--ro-bind-try", tc, tc)
+		}
+	}
+
 	// Extra allowed read paths
 	for _, p := range l.opts.ExtraAllowRead {
 		cleaned := strings.TrimSpace(p)

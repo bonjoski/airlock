@@ -70,6 +70,28 @@ func TestGetBuiltinProfile_OtherProfiles(t *testing.T) {
 		t.Fatalf("default profile failed: %v", err)
 	}
 
+	standard, err := GetBuiltinProfile(ProfileStandard)
+	if err != nil || standard == nil {
+		t.Fatalf("standard profile failed: %v", err)
+	}
+	if standard.Network.UnknownDomainAction != "refused" {
+		t.Fatalf("expected standard profile to have unknown_domain_action refused, got %s", standard.Network.UnknownDomainAction)
+	}
+
+	// Verify Go, Rust, Node, Python language runtime domains
+	requiredDomains := []string{
+		"proxy.golang.org",
+		"crates.io",
+		"registry.npmjs.org",
+		"pypi.org",
+		"github.com",
+	}
+	for _, req := range requiredDomains {
+		if !MatchAnyDomain(standard.Network.AllowDomains, req) {
+			t.Fatalf("expected standard profile to allow domain %s", req)
+		}
+	}
+
 	_, err = GetBuiltinProfile("invalid_unknown_profile")
 	if err == nil {
 		t.Fatal("expected error for unknown profile, got nil")

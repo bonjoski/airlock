@@ -15,9 +15,10 @@ import (
 	"github.com/bonjoski/airlock/pkg/vet"
 )
 
-// Options holds runtime parameters for sandboxed execution.
-type Options struct {
+// SandboxOpts holds runtime parameters and policies for sandboxed execution.
+type SandboxOpts struct {
 	WorkspaceRoot   string
+	Profile         string // Execution profile ("standard", "agent", "strict", "airgap", "default")
 	ConfigPath      string
 	Airgap          bool
 	AllowDirectNet  bool
@@ -44,6 +45,9 @@ type Options struct {
 	Stderr          io.Writer
 	Stdin           io.Reader
 }
+
+// Options is an alias for SandboxOpts to maintain backwards compatibility.
+type Options = SandboxOpts
 
 // Engine defines the common execution interface for process confinement backends (OCP/LSP).
 type Engine interface {

@@ -18,6 +18,7 @@ const (
 	ModeStrict     Mode = "strict"
 	ModePermissive Mode = "permissive"
 	ModeAudit      Mode = "audit"
+	ModeStandard   Mode = "standard"
 )
 
 // Config represents the top-level declarative policy configuration for Airlock.

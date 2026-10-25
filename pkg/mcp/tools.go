@@ -164,15 +164,7 @@ type ExecArgs struct {
 }
 
 // ExecResult represents structured execution output.
-type ExecResult struct {
-	ExitCode       int      `json:"exit_code"`
-	Stdout         string   `json:"stdout"`
-	Stderr         string   `json:"stderr"`
-	DurationMs     int64    `json:"duration_ms"`
-	Airgap         bool     `json:"airgap"`
-	AllowedDomains []string `json:"allowed_domains"`
-	Error          string   `json:"error,omitempty"`
-}
+type ExecResult = sandbox.ExecResult
 
 func (h *DefaultToolHandler) HandleExec(ctx context.Context, rawArgs json.RawMessage) (*CallToolResult, error) {
 	var args ExecArgs
