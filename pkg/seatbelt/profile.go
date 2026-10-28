@@ -49,7 +49,7 @@ const profileTemplate = `;; Airlock Hardened Confinement Policy
 (allow process-exec)
 (allow sysctl-read)
 
-;; 2. Terminal and Pseudo-Device I/O
+;; 2. Terminal and Pseudo-Device I/O & File Locking
 (allow file-read* file-write*
   (literal "/dev/null")
   (literal "/dev/zero")
@@ -58,6 +58,9 @@ const profileTemplate = `;; Airlock Hardened Confinement Policy
   (literal "/dev/dtracehelper")
   (regex #"^/dev/tty.*")
   (regex #"^/dev/ptmx.*"))
+
+(allow file-lock)
+(allow ipc-posix-shm*)
 
 ;; 3. Mach IPC Hardening (V-10: Neutralize Keychain, LaunchServices, Clipboard, TCC)
 (deny mach-lookup
@@ -71,7 +74,9 @@ const profileTemplate = `;; Airlock Hardened Confinement Policy
 
 (allow mach-lookup
   (global-name "com.apple.system.logger")
-  (global-name "com.apple.system.notification_center"))
+  (global-name "com.apple.system.notification_center")
+  (global-name "com.apple.trustd.agent")
+  (global-name "com.apple.trustd"))
 
 ;; 4. Filesystem Read Policy: Allow system reads, but strictly block host and workspace secrets
 (allow file-read*)
@@ -91,10 +96,6 @@ const profileTemplate = `;; Airlock Hardened Confinement Policy
 (deny file-read* file-write*
   (regex #"^/(Users|home)/[^/]+/\.(ssh|aws|gnupg|kube|config/gcloud)"))
 
-;; Block access to launchd listeners in /tmp (V-10: ssh-agent socket protection)
-(deny file-read* file-write*
-  (regex #"^(/private)?/tmp/com\.apple\.launchd\..*"))
-
 ;; Block Docker daemon socket (V-06: Localhost Pivoting)
 (deny file-read* file-write*
   (literal "/var/run/docker.sock")
@@ -105,21 +106,36 @@ const profileTemplate = `;; Airlock Hardened Confinement Policy
   (subpath "{{.WorkspaceRoot}}/.env")
   (regex #"^{{.WorkspaceRootEscaped}}/\.env(\..+)?$")
   (regex #"^{{.WorkspaceRootEscaped}}/.*\.pem$")
+  (regex #"^{{.WorkspaceRootEscaped}}/.*\.key$")
   (regex #"^{{.WorkspaceRootEscaped}}/(id_rsa|id_ed25519).*$")
   (regex #"^{{.WorkspaceRootEscaped}}/secrets\.json$"))
 {{range .ExtraDenyRead}}
 (deny file-read* (subpath "{{.}}"))
 {{end}}
 
-;; 5. Filesystem Write Policy: Strictly confined to Workspace and Scratch (V-03)
+;; Permit CA certificate bundles inside workspace/virtualenvs even if named .pem (F3)
+(allow file-read*
+  (regex #"^{{.WorkspaceRootEscaped}}/(.*/)?(certifi|_vendor/certifi)/cacert\.pem$")
+  (regex #"^{{.WorkspaceRootEscaped}}/(.*/)?cacert.*\.pem$")
+  (regex #"^{{.WorkspaceRootEscaped}}/(.*/)?ca-certificates?/.*\.pem$")
+  (regex #"^{{.WorkspaceRootEscaped}}/(.*/)?(ca-bundle|tls-ca-bundle)\.pem$"))
+
+;; 5. Filesystem Write Policy: Strictly confined to Workspace, Scratch, and System Temp (V-03)
 (deny file-write*)
 
 (allow file-write*
   (subpath "{{.WorkspaceRoot}}")
-  (subpath "{{.ScratchDir}}"))
+  (subpath "{{.ScratchDir}}")
+  (subpath "/tmp")
+  (subpath "/private/tmp"))
 {{range .ExtraAllowWrite}}
 (allow file-write* (subpath "{{.}}"))
 {{end}}
+
+;; Block access to launchd listeners in /tmp (V-10: ssh-agent socket protection)
+;; Must appear after allow file-write* to strictly enforce denial in SBPL
+(deny file-read* file-write*
+  (regex #"^(/private)?/tmp/com\.apple\.launchd\..*"))
 
 ;; Prevent Workspace poisoning: protect .git directory from modification (V-03)
 (deny file-write*

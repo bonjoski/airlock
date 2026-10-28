@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -105,6 +106,19 @@ func (r *DefaultRunner) Execute(ctx context.Context, cmd []string, opts SandboxO
 	// 2. Synthesize Effective Sandbox Options
 	effectiveOpts := opts
 	effectiveOpts.WorkspaceRoot = workspaceRoot
+
+	workingDir := opts.WorkingDir
+	if workingDir == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			workingDir = cwd
+		} else {
+			workingDir = workspaceRoot
+		}
+	}
+	if resolved, err := filepath.EvalSymlinks(workingDir); err == nil {
+		workingDir = resolved
+	}
+	effectiveOpts.WorkingDir = workingDir
 
 	if loadedCfg != nil {
 		config.SanitizeAndEnforceGuardrails(loadedCfg)

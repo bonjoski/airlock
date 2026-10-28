@@ -52,7 +52,11 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 	// If already running inside an active Airlock boundary, avoid nested sandbox crashes.
 	if os.Getenv("__AIRLOCK_ACTIVE") == "1" {
 		cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
-		cmd.Dir = m.opts.WorkspaceRoot
+		if m.opts.WorkingDir != "" {
+			cmd.Dir = m.opts.WorkingDir
+		} else {
+			cmd.Dir = m.opts.WorkspaceRoot
+		}
 		cmd.Stdin = m.resolveStdin()
 		cmd.Stdout = m.resolveStdout()
 		cmd.Stderr = m.resolveStderr()
@@ -183,7 +187,11 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 	// 7. Assemble Command Execution via sandbox-exec
 	execArgs := append([]string{"-p", profileStr}, cmdArgs...)
 	cmd := exec.CommandContext(ctx, "sandbox-exec", execArgs...)
-	cmd.Dir = m.opts.WorkspaceRoot
+	if m.opts.WorkingDir != "" {
+		cmd.Dir = m.opts.WorkingDir
+	} else {
+		cmd.Dir = m.opts.WorkspaceRoot
+	}
 	cmd.Env = sanitizedEnv
 	cmd.Stdout = m.resolveStdout()
 	cmd.Stderr = m.resolveStderr()

@@ -394,6 +394,26 @@ func GenerateTemplate(projectType string) string {
 		comment = "# Airlock Policy — Go Workspace"
 		specificDomains = []string{"proxy.golang.org", "sum.golang.org", "github.com"}
 		specificEnv = []string{"GOPROXY", "GOSUMDB", "GOPRIVATE"}
+	case "java", "jvm", "maven", "gradle":
+		comment = "# Airlock Policy — Java / JVM Workspace"
+		specificDomains = []string{"repo.maven.apache.org", "repo1.maven.org", "plugins.gradle.org", "github.com"}
+		specificEnv = []string{"JAVA_HOME", "MAVEN_OPTS", "GRADLE_USER_HOME"}
+	case "dotnet", "csharp", "nuget":
+		comment = "# Airlock Policy — .NET / C# Workspace"
+		specificDomains = []string{"api.nuget.org", "nuget.org", "azuresearch-usnc.nuget.org", "github.com"}
+		specificEnv = []string{"DOTNET_ROOT", "DOTNET_ENVIRONMENT", "NUGET_PACKAGES"}
+	case "ruby", "gem", "rails":
+		comment = "# Airlock Policy — Ruby Workspace"
+		specificDomains = []string{"rubygems.org", "index.rubygems.org", "github.com"}
+		specificEnv = []string{"RAILS_ENV", "GEM_HOME", "BUNDLE_PATH"}
+	case "swift", "spm", "ios", "macos", "cocoapods":
+		comment = "# Airlock Policy — Swift / Apple Workspace"
+		specificDomains = []string{"github.com", "api.github.com", "cdn.cocoapods.org"}
+		specificEnv = []string{"SWIFTPM_CACHE_DIR", "CP_CACHE_DIR", "DEVELOPER_DIR"}
+	case "container", "docker", "k8s", "helm":
+		comment = "# Airlock Policy — Container / Kubernetes Workspace"
+		specificDomains = []string{"docker.io", "registry-1.docker.io", "ghcr.io", "quay.io", "gcr.io"}
+		specificEnv = []string{"HELM_CACHE_HOME", "DOCKER_CONFIG"}
 	default:
 		comment = "# Airlock Policy — General Workspace"
 		specificDomains = []string{"registry.npmjs.org", "pypi.org", "crates.io"}

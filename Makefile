@@ -7,7 +7,7 @@ BIN_DIR := bin
 DIST_DIR := dist
 MAIN_PKG := ./cmd/airlock
 VERSION_PKG := github.com/bonjoski/airlock/pkg/version
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.8.0")
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.8.1")
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 

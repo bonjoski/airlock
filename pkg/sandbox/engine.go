@@ -18,6 +18,7 @@ import (
 // SandboxOpts holds runtime parameters and policies for sandboxed execution.
 type SandboxOpts struct {
 	WorkspaceRoot   string
+	WorkingDir      string // Preserved working directory for executed commands
 	Profile         string // Execution profile ("standard", "agent", "strict", "airgap", "default")
 	ConfigPath      string
 	Airgap          bool
@@ -69,6 +70,17 @@ func NewEngine(opts Options) (Engine, error) {
 		opts.WorkspaceRoot = resolved
 	}
 
+	if opts.WorkingDir == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			opts.WorkingDir = cwd
+		} else {
+			opts.WorkingDir = opts.WorkspaceRoot
+		}
+	}
+	if resolved, err := filepath.EvalSymlinks(opts.WorkingDir); err == nil {
+		opts.WorkingDir = resolved
+	}
+
 	switch runtime.GOOS {
 	case "darwin":
 		return NewMacOSEngine(opts)
@@ -95,6 +107,26 @@ func FindWorkspaceRoot(startDir string) string {
 			"package.json",
 			"pyproject.toml",
 			"go.mod",
+			"pom.xml",
+			"build.gradle",
+			"build.gradle.kts",
+			"settings.gradle",
+			"settings.gradle.kts",
+			"Gemfile",
+			"Gemfile.lock",
+			"Package.swift",
+			"Package.resolved",
+			"Podfile",
+			"Podfile.lock",
+			"global.json",
+			"nuget.config",
+			"Dockerfile",
+			"docker-compose.yaml",
+			"docker-compose.yml",
+			"compose.yaml",
+			"compose.yml",
+			"Chart.yaml",
+			"kustomization.yaml",
 		}
 
 		for _, marker := range markers {
@@ -102,6 +134,20 @@ func FindWorkspaceRoot(startDir string) string {
 			if _, err := os.Stat(target); err == nil {
 				return curr
 			}
+		}
+
+		// Check for .NET solution or project files, and Apple Xcode workspaces
+		if matches, _ := filepath.Glob(filepath.Join(curr, "*.sln")); len(matches) > 0 {
+			return curr
+		}
+		if matches, _ := filepath.Glob(filepath.Join(curr, "*.csproj")); len(matches) > 0 {
+			return curr
+		}
+		if matches, _ := filepath.Glob(filepath.Join(curr, "*.xcworkspace")); len(matches) > 0 {
+			return curr
+		}
+		if matches, _ := filepath.Glob(filepath.Join(curr, "*.xcodeproj")); len(matches) > 0 {
+			return curr
 		}
 
 		parent := filepath.Dir(curr)

@@ -59,6 +59,21 @@ func TestProfileGenerator_Generate(t *testing.T) {
 	if !strings.Contains(profile, `(allow network-outbound (to tcp "localhost:18443"))`) {
 		t.Errorf("Profile missing proxy port outbound allowance")
 	}
+
+	// 7. Must permit trustd for system trust settings evaluation (F2)
+	if !strings.Contains(profile, `"com.apple.trustd.agent"`) {
+		t.Errorf("Profile missing trustd.agent allow rule")
+	}
+
+	// 8. Must allow file-lock and ipc-posix-shm (F4)
+	if !strings.Contains(profile, `(allow file-lock)`) {
+		t.Errorf("Profile missing file-lock allowance")
+	}
+
+	// 9. Must permit CA certificate bundles inside workspace (F3)
+	if !strings.Contains(profile, `cacert\.pem`) {
+		t.Errorf("Profile missing cacert.pem allowance rule")
+	}
 }
 
 // TestLiveSeatbeltCompilation verifies that the profile compiles cleanly

@@ -8,7 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Sigstore Cosign](https://img.shields.io/badge/Signed_with-Sigstore_Cosign-blueviolet.svg)](https://docs.sigstore.dev)
 
-Airlock (`airlock`) provides sub-8ms, zero-VM process confinement for package managers (`npm`, `pip`, `cargo`, `uv`, `bun`, `pnpm`, `yarn`) and autonomous AI coding agents (Claude Desktop, Cursor, Gemini CLI, Antigravity) directly on developer workstations.
+Airlock (`airlock`) provides sub-8ms, zero-VM process confinement for package managers and build tools across major ecosystems (`npm`, `pnpm`, `yarn`, `bun`, `pip`, `uv`, `cargo`, `go`, `mvn`, `gradle`, `dotnet`, `nuget`, `gem`, `bundle`, `swift`, `pod`, `helm`) and autonomous AI coding agents (Claude Desktop, Cursor, Gemini CLI, Antigravity) directly on developer workstations.
 
 ---
 
@@ -169,7 +169,7 @@ Summary: 10 passed, 0 warnings, 0 failures (System HEALTHY)
 ---
 
 ### Step 3: Enable Transparent Package Manager Shims
-Install lightweight shell shims for `npm`, `npx`, `pnpm`, `yarn`, `pip`, `pip3`, `cargo`, `uv`, and `bun`:
+Install lightweight shell shims for your toolchains (`npm`, `npx`, `pnpm`, `yarn`, `bun`, `pip`, `pip3`, `uv`, `cargo`, `go`, `mvn`, `gradle`, `dotnet`, `nuget`, `gem`, `bundle`, `swift`, `pod`, `helm`):
 ```bash
 airlock shim install
 ```
@@ -177,7 +177,7 @@ Add `~/.airlock/bin` to your `~/.zshrc` or `~/.bashrc`:
 ```bash
 export PATH="$HOME/.airlock/bin:$PATH"
 ```
-🎉 **That's it!** All future `npm install`, `pip install`, and `cargo build` commands run automatically inside zero-trust kernel sandboxes with zero behavioral changes.
+🎉 **That's it!** All future install and build commands across supported ecosystems run automatically inside zero-trust kernel sandboxes with zero behavioral changes.
 
 ---
 
@@ -320,10 +320,23 @@ airlock audit export --format csv --output /tmp/audit.csv
 Scaffold and validate declarative `airlock.yaml` workspace policies:
 ```bash
 # Generate project policy
-airlock init --type node      # Options: node, python, rust, go, general
+airlock init --type node      # Options: node, python, rust, go, java, dotnet, ruby, swift, container, general
 
 # Validate policy against immutable security guardrails
 airlock config validate --config ./airlock.yaml
+```
+
+#### Corporate Artifact Mirror Lockdown (Artifactory, Nexus)
+Lock down all package managers to enterprise mirrors and block public egress:
+```yaml
+version: "1"
+mode: "strict"
+network:
+  airgap: false
+  allow_domains:
+    - "artifactory.corp.internal"
+    - "nexus.corp.internal"
+  unknown_domain_action: "refused"
 ```
 
 ### 5. `airlock vet` (Argus Threat Engine)
@@ -352,7 +365,7 @@ airlock shim uninstall
 
 ---
 
-## 🛡️ 32/32 Adversarial Security Verification Battery
+## 🛡️ 33/33 Adversarial Security Verification Battery
 
 Every CI build executes an automated suite of adversarial attack simulations validating that root zero-trust invariants cannot be bypassed:
 
@@ -390,6 +403,7 @@ Every CI build executes an automated suite of adversarial attack simulations val
 | **SEC-30** | `TestSEC30_MCPExtensions` | — | MCP protocol compliance for resources (`audit`, `policy`, `health`) and prompts. | **[PASS]** |
 | **SEC-31** | `TestSEC31_ExtendedSupplyChainThreats` | — | Argus static analysis detection across Go, Ruby, and Obfuscated Shell pipelines. | **[PASS]** |
 | **SEC-32** | `TestSEC32_SecretRedaction` | **V-24** | Dynamic in-stream secret redactor masking API keys/tokens across stdout & MCP. | **[PASS]** |
+| **SEC-33** | `TestSEC33_AdvisoryRemediations_Adversarial` | **F1-F6** | GHSA-3vmj-37wh-72q5 hardening: cwd traversal defense, macOS trustd/securityd isolation, venv CA bundle access vs secret key denial, /tmp pnpm lock & launchd isolation, cache poisoning defense, and binary shadowing detection. | **[PASS]** |
 
 ---
 

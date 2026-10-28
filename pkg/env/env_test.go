@@ -88,6 +88,24 @@ func TestSanitizer_Sanitize(t *testing.T) {
 	if envMap["PIP_CACHE_DIR"] != "/tmp/airlock-test/cache/pip" {
 		t.Errorf("Expected PIP_CACHE_DIR redirect, got %s", envMap["PIP_CACHE_DIR"])
 	}
+	if envMap["pnpm_config_store_dir"] != "/tmp/airlock-test/cache/pnpm-store" {
+		t.Errorf("Expected pnpm_config_store_dir redirect, got %s", envMap["pnpm_config_store_dir"])
+	}
+	if envMap["GRADLE_USER_HOME"] != "/tmp/airlock-test/cache/gradle" {
+		t.Errorf("Expected GRADLE_USER_HOME redirect, got %s", envMap["GRADLE_USER_HOME"])
+	}
+	if envMap["DOTNET_CLI_HOME"] != "/tmp/airlock-test/cache/dotnet" {
+		t.Errorf("Expected DOTNET_CLI_HOME redirect, got %s", envMap["DOTNET_CLI_HOME"])
+	}
+	if envMap["GEM_HOME"] != "/tmp/airlock-test/cache/gem" {
+		t.Errorf("Expected GEM_HOME redirect, got %s", envMap["GEM_HOME"])
+	}
+	if envMap["SWIFTPM_CACHE_DIR"] != "/tmp/airlock-test/cache/swiftpm" {
+		t.Errorf("Expected SWIFTPM_CACHE_DIR redirect, got %s", envMap["SWIFTPM_CACHE_DIR"])
+	}
+	if envMap["HELM_CACHE_HOME"] != "/tmp/airlock-test/cache/helm" {
+		t.Errorf("Expected HELM_CACHE_HOME redirect, got %s", envMap["HELM_CACHE_HOME"])
+	}
 
 	// 6. Proxy configuration injected
 	if envMap["HTTP_PROXY"] != "http://127.0.0.1:18443" {

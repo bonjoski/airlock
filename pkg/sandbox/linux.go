@@ -122,7 +122,8 @@ func FindWorkspaceSecrets(workspaceRoot string) ([]string, error) {
 		name := entry.Name()
 
 		isSecret := strings.HasPrefix(name, ".env") ||
-			strings.HasSuffix(name, ".pem") ||
+			(strings.HasSuffix(name, ".pem") && !strings.Contains(name, "cacert") && !strings.Contains(name, "ca-bundle")) ||
+			strings.HasSuffix(name, ".key") ||
 			strings.HasPrefix(name, "id_rsa") ||
 			strings.HasPrefix(name, "id_ed25519") ||
 			strings.HasPrefix(name, "id_ecdsa") ||
@@ -176,11 +177,16 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 		"--setenv", "TMPDIR", "/tmp",
 	)
 
+	chdirTarget := l.opts.WorkspaceRoot
+	if l.opts.WorkingDir != "" {
+		chdirTarget = l.opts.WorkingDir
+	}
+
 	// Workspace Root Mount (Read-Write for builds and installs)
 	args = append(args,
 		"--dir", l.opts.WorkspaceRoot,
 		"--bind", l.opts.WorkspaceRoot, l.opts.WorkspaceRoot,
-		"--chdir", l.opts.WorkspaceRoot,
+		"--chdir", chdirTarget,
 	)
 
 	// Git Metadata Protection (V-03: Workspace Poisoning Prevention)
@@ -279,7 +285,11 @@ func (l *LinuxEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 	// 1. Recursive Sandbox Detection (V-14 / Phase 1)
 	if os.Getenv("__AIRLOCK_ACTIVE") == "1" {
 		cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
-		cmd.Dir = l.opts.WorkspaceRoot
+		if l.opts.WorkingDir != "" {
+			cmd.Dir = l.opts.WorkingDir
+		} else {
+			cmd.Dir = l.opts.WorkspaceRoot
+		}
 		cmd.Stdin = l.resolveStdin()
 		cmd.Stdout = l.resolveStdout()
 		cmd.Stderr = l.resolveStderr()
@@ -405,7 +415,11 @@ func (l *LinuxEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 
 	// 8. Assemble Command Execution via bwrap
 	cmd := exec.CommandContext(ctx, l.bwrapPath, fullArgs...)
-	cmd.Dir = l.opts.WorkspaceRoot
+	if l.opts.WorkingDir != "" {
+		cmd.Dir = l.opts.WorkingDir
+	} else {
+		cmd.Dir = l.opts.WorkspaceRoot
+	}
 	cmd.Env = sanitizedEnv
 	cmd.Stdout = l.resolveStdout()
 	cmd.Stderr = l.resolveStderr()

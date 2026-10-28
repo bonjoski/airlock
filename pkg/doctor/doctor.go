@@ -194,6 +194,29 @@ func CheckPlatformSandbox(ctx context.Context, opts Options) []CheckResult {
 				Title:    "macOS Seatbelt profile synthesis",
 				Details:  "Hardened Seatbelt SBPL profile compiled successfully",
 			})
+
+			// 3. Check macOS Trust Settings & Certificate Verification Viability (F2 / F5)
+			if execPath != "" {
+				trustCmd := exec.CommandContext(ctx, execPath, "-p", profile, "security", "trust-settings-export", "/dev/null")
+				if trustErr := trustCmd.Run(); trustErr != nil {
+					results = append(results, CheckResult{
+						ID:             "sandbox-system-trust",
+						Category:       "Platform Sandbox Primitives",
+						Status:         StatusWarn,
+						Title:          "macOS System Trust Settings Access",
+						Details:        fmt.Sprintf("Trust settings evaluation inside sandbox failed: %v", trustErr),
+						Recommendation: "Ensure com.apple.trustd.agent Mach lookup is permitted in Seatbelt policy.",
+					})
+				} else {
+					results = append(results, CheckResult{
+						ID:       "sandbox-system-trust",
+						Category: "Platform Sandbox Primitives",
+						Status:   StatusPass,
+						Title:    "macOS System Trust Settings Access",
+						Details:  "System trust settings evaluation inside sandbox verified",
+					})
+				}
+			}
 		}
 
 	case "linux":
@@ -360,7 +383,9 @@ func CheckStoragePermissions(ctx context.Context, opts Options) []CheckResult {
 					Recommendation: fmt.Sprintf("Ensure %s permissions allow writing.", airlockDir),
 				})
 			} else {
-				_ = os.Remove(testFile)
+				if rmErr := os.Remove(testFile); rmErr != nil && !os.IsNotExist(rmErr) {
+					_ = rmErr
+				}
 				results = append(results, CheckResult{
 					ID:       "storage-airlock-dir",
 					Category: "Storage & Permissions",
@@ -438,8 +463,28 @@ func CheckStoragePermissions(ctx context.Context, opts Options) []CheckResult {
 	}
 
 	results = append(results, checkCacheDir("storage-npm-cache", "Node / npm cache (~/.npm)", ".npm"))
+	pnpmRelPath := filepath.Join(".local", "share", "pnpm")
+	if opts.GOOS == "darwin" {
+		pnpmRelPath = filepath.Join("Library", "pnpm")
+	}
+	results = append(results, checkCacheDir("storage-pnpm-store", "pnpm store directory", pnpmRelPath))
 	results = append(results, checkCacheDir("storage-pip-cache", "Python / pip cache (~/.cache/pip)", filepath.Join(".cache", "pip")))
 	results = append(results, checkCacheDir("storage-cargo-cache", "Rust / Cargo cache (~/.cargo/registry)", filepath.Join(".cargo", "registry")))
+	results = append(results, checkCacheDir("storage-maven-cache", "Java / Maven repository (~/.m2/repository)", filepath.Join(".m2", "repository")))
+	results = append(results, checkCacheDir("storage-gradle-cache", "Java / Gradle cache (~/.gradle)", ".gradle"))
+	results = append(results, checkCacheDir("storage-nuget-cache", ".NET / NuGet cache (~/.nuget/packages)", filepath.Join(".nuget", "packages")))
+	results = append(results, checkCacheDir("storage-gem-cache", "Ruby / Gem cache (~/.gem)", ".gem"))
+	swiftRelPath := filepath.Join(".cache", "org.swift.swiftpm")
+	if opts.GOOS == "darwin" {
+		swiftRelPath = filepath.Join("Library", "Caches", "org.swift.swiftpm")
+		results = append(results, checkCacheDir("storage-cocoapods-cache", "CocoaPods cache (~/Library/Caches/CocoaPods)", filepath.Join("Library", "Caches", "CocoaPods")))
+	}
+	results = append(results, checkCacheDir("storage-swiftpm-cache", "SwiftPM repository cache", swiftRelPath))
+	helmRelPath := filepath.Join(".cache", "helm")
+	if opts.GOOS == "darwin" {
+		helmRelPath = filepath.Join("Library", "Caches", "helm")
+	}
+	results = append(results, checkCacheDir("storage-helm-cache", "Kubernetes / Helm cache", helmRelPath))
 
 	// 3. Ephemeral Scratch Space (0700 permissions)
 	sc, err := scratch.New(opts.ScratchBase)
@@ -628,20 +673,35 @@ func CheckToolchainShims(ctx context.Context, opts Options) []CheckResult {
 		})
 	} else {
 		var activeTools []string
+		var missingHostTools []string
 		for _, s := range shims {
 			if s.Installed {
 				activeTools = append(activeTools, s.Tool)
+				if s.TargetHostBinary == "" {
+					missingHostTools = append(missingHostTools, s.Tool)
+				}
 			}
 		}
 
 		if len(activeTools) > 0 {
-			results = append(results, CheckResult{
-				ID:       "shims-inventory",
-				Category: "Toolchain Shims",
-				Status:   StatusPass,
-				Title:    "Active shim inventory",
-				Details:  fmt.Sprintf("%d transparent shims active: %s", len(activeTools), strings.Join(activeTools, ", ")),
-			})
+			if len(missingHostTools) > 0 {
+				results = append(results, CheckResult{
+					ID:             "shims-inventory",
+					Category:       "Toolchain Shims",
+					Status:         StatusWarn,
+					Title:          "Active shim inventory",
+					Details:        fmt.Sprintf("%d shims active (%s), but %d host binaries are missing: %s", len(activeTools), strings.Join(activeTools, ", "), len(missingHostTools), strings.Join(missingHostTools, ", ")),
+					Recommendation: "Install the missing host tools or run 'airlock shim uninstall' if not needed.",
+				})
+			} else {
+				results = append(results, CheckResult{
+					ID:       "shims-inventory",
+					Category: "Toolchain Shims",
+					Status:   StatusPass,
+					Title:    "Active shim inventory",
+					Details:  fmt.Sprintf("%d transparent shims active: %s", len(activeTools), strings.Join(activeTools, ", ")),
+				})
+			}
 		} else {
 			results = append(results, CheckResult{
 				ID:             "shims-inventory",
@@ -652,6 +712,60 @@ func CheckToolchainShims(ctx context.Context, opts Options) []CheckResult {
 				Recommendation: "Run 'airlock shim install' if you wish to enable transparent interception for npm/pip/cargo.",
 			})
 		}
+	}
+
+	// 3. Detect airlock binary inside shim directory (Workstation shadowing bug)
+	airlockInShimDir := filepath.Join(shimDir, "airlock")
+	if runtime.GOOS == "windows" {
+		airlockInShimDir += ".exe"
+	}
+	if info, err := os.Stat(airlockInShimDir); err == nil && !info.IsDir() {
+		results = append(results, CheckResult{
+			ID:             "shims-shadowing-airlock",
+			Category:       "Toolchain Shims",
+			Status:         StatusWarn,
+			Title:          "Airlock executable inside shim directory",
+			Details:        fmt.Sprintf("Found '%s' inside the shim directory. When the shim directory is prepended to $PATH, this copy permanently shadows Homebrew or package manager upgrades.", airlockInShimDir),
+			Recommendation: fmt.Sprintf("Remove '%s' so that Homebrew/package manager managed airlock is invoked.", airlockInShimDir),
+		})
+	}
+
+	// 4. Detect multiple airlock binaries in $PATH causing upgrade shadowing
+	pathVar := opts.PathEnv
+	if pathVar == "" {
+		pathVar = os.Getenv("PATH")
+	}
+	pathEntriesSplit := filepath.SplitList(pathVar)
+	var foundBinaries []string
+	seen := make(map[string]bool)
+	for _, entry := range pathEntriesSplit {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		candidate := filepath.Join(entry, "airlock")
+		if runtime.GOOS == "windows" {
+			candidate += ".exe"
+		}
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			cleanPath := filepath.Clean(candidate)
+			if !seen[cleanPath] {
+				seen[cleanPath] = true
+				foundBinaries = append(foundBinaries, cleanPath)
+			}
+		}
+	}
+	if len(foundBinaries) > 1 {
+		active := foundBinaries[0]
+		shadowed := strings.Join(foundBinaries[1:], ", ")
+		results = append(results, CheckResult{
+			ID:             "shims-path-shadowing",
+			Category:       "Toolchain Shims",
+			Status:         StatusWarn,
+			Title:          "Airlock binary shadowing in $PATH",
+			Details:        fmt.Sprintf("Multiple airlock binaries detected in $PATH. Active binary: %s (shadows: %s)", active, shadowed),
+			Recommendation: fmt.Sprintf("Remove stale airlock binaries (%s) so package manager upgrades take effect.", shadowed),
+		})
 	}
 
 	return results

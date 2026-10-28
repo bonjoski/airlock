@@ -193,6 +193,18 @@ func (s *DefaultSanitizer) Sanitize(hostEnv []string) []string {
 			"CARGO_TARGET_DIR="+filepath.Join(s.config.StagingCache, "cargo-target"),
 			"GOCACHE="+filepath.Join(s.config.StagingCache, "go-build"),
 			"GOMODCACHE="+filepath.Join(s.config.StagingCache, "go-mod"),
+			"pnpm_config_store_dir="+filepath.Join(s.config.StagingCache, "pnpm-store"),
+			"pnpm_config_cache_dir="+filepath.Join(s.config.StagingCache, "pnpm-cache"),
+			"PNPM_HOME="+filepath.Join(s.config.StagingCache, "pnpm-home"),
+			"GRADLE_USER_HOME="+filepath.Join(s.config.StagingCache, "gradle"),
+			"MAVEN_OPTS=-Dmaven.repo.local="+filepath.Join(s.config.StagingCache, "m2", "repository"),
+			"NUGET_PACKAGES="+filepath.Join(s.config.StagingCache, "nuget", "packages"),
+			"DOTNET_CLI_HOME="+filepath.Join(s.config.StagingCache, "dotnet"),
+			"GEM_HOME="+filepath.Join(s.config.StagingCache, "gem"),
+			"BUNDLE_PATH="+filepath.Join(s.config.StagingCache, "bundle"),
+			"SWIFTPM_CACHE_DIR="+filepath.Join(s.config.StagingCache, "swiftpm"),
+			"CP_CACHE_DIR="+filepath.Join(s.config.StagingCache, "cocoapods"),
+			"HELM_CACHE_HOME="+filepath.Join(s.config.StagingCache, "helm"),
 		)
 	}
 

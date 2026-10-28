@@ -11,7 +11,7 @@
 set -eu
 
 REPO="bonjoski/airlock"
-DEFAULT_VERSION="v0.8.0"
+DEFAULT_VERSION="v0.8.1"
 
 # Color helpers (disabled if not connected to a terminal)
 if [ -t 1 ]; then

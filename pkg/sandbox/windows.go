@@ -96,7 +96,11 @@ func (w *WindowsEngine) Execute(ctx context.Context, cmdArgs []string) (int, err
 	// 1. Recursive Sandbox Detection (V-14 / Phase 1)
 	if os.Getenv("__AIRLOCK_ACTIVE") == "1" {
 		cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
-		cmd.Dir = w.opts.WorkspaceRoot
+		if w.opts.WorkingDir != "" {
+			cmd.Dir = w.opts.WorkingDir
+		} else {
+			cmd.Dir = w.opts.WorkspaceRoot
+		}
 		cmd.Stdin = w.resolveStdin()
 		cmd.Stdout = w.resolveStdout()
 		cmd.Stderr = w.resolveStderr()
@@ -212,7 +216,11 @@ func (w *WindowsEngine) Execute(ctx context.Context, cmdArgs []string) (int, err
 
 	// 8. Assemble Command Execution
 	cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
-	cmd.Dir = w.opts.WorkspaceRoot
+	if w.opts.WorkingDir != "" {
+		cmd.Dir = w.opts.WorkingDir
+	} else {
+		cmd.Dir = w.opts.WorkspaceRoot
+	}
 	cmd.Env = sanitizedEnv
 	cmd.Stdout = w.resolveStdout()
 	cmd.Stderr = w.resolveStderr()

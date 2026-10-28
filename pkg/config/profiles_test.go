@@ -85,6 +85,13 @@ func TestGetBuiltinProfile_OtherProfiles(t *testing.T) {
 		"registry.npmjs.org",
 		"pypi.org",
 		"github.com",
+		"repo1.maven.org",
+		"api.nuget.org",
+		"rubygems.org",
+		"cdn.cocoapods.org",
+		"registry-1.docker.io",
+		"ghcr.io",
+		"charts.helm.sh",
 	}
 	for _, req := range requiredDomains {
 		if !MatchAnyDomain(standard.Network.AllowDomains, req) {

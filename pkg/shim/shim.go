@@ -13,7 +13,8 @@ import (
 
 // SupportedTools lists package managers and build tools supported by Airlock shims.
 var SupportedTools = []string{
-	"npm", "npx", "pnpm", "yarn", "pip", "pip3", "cargo", "uv", "bun",
+	"npm", "npx", "pnpm", "yarn", "pip", "pip3", "cargo", "uv", "bun", "go",
+	"mvn", "gradle", "dotnet", "nuget", "gem", "bundle", "swift", "pod", "helm",
 }
 
 // ShimStatus describes the installation state of a particular toolchain shim.
@@ -103,7 +104,10 @@ func (m *DefaultManager) Uninstall(targetDir string) error {
 		}
 
 		cmdPath := filepath.Join(targetDir, tool+".cmd")
-		_ = os.Remove(cmdPath)
+		if err := os.Remove(cmdPath); err != nil && !os.IsNotExist(err) {
+			// Best-effort cleanup for Windows cmd wrapper
+			_ = err
+		}
 	}
 
 	return nil

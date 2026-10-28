@@ -67,7 +67,11 @@ func ExecuteMicroVM(ctx context.Context, opts sandbox.Options, cmdArgs []string)
 	args = append(args, cmdArgs...)
 
 	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Dir = opts.WorkspaceRoot
+	if opts.WorkingDir != "" {
+		cmd.Dir = opts.WorkingDir
+	} else {
+		cmd.Dir = opts.WorkspaceRoot
+	}
 	cmd.Stdin = opts.Stdin
 	cmd.Stdout = opts.Stdout
 	cmd.Stderr = opts.Stderr

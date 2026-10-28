@@ -32,6 +32,27 @@ var StandardDefaultAllowDomains = []string{
 	"pypi.org",
 	"files.pythonhosted.org",
 	"pypi.python.org",
+	// Java / Maven / Gradle
+	"repo.maven.apache.org",
+	"repo1.maven.org",
+	"plugins.gradle.org",
+	// .NET / NuGet
+	"api.nuget.org",
+	"nuget.org",
+	"azuresearch-usnc.nuget.org",
+	// Ruby
+	"rubygems.org",
+	"index.rubygems.org",
+	// Swift / CocoaPods
+	"cdn.cocoapods.org",
+	// Container / OCI Registries & Helm
+	"docker.io",
+	"registry-1.docker.io",
+	"ghcr.io",
+	"quay.io",
+	"gcr.io",
+	"charts.helm.sh",
+	"artifacthub.io",
 	// VCS / GitHub
 	"github.com",
 	"api.github.com",
@@ -53,6 +74,11 @@ var AgentDefaultAllowDomains = []string{
 	"proxy.golang.org",
 	"crates.io",
 	"static.crates.io",
+	"repo.maven.apache.org",
+	"api.nuget.org",
+	"rubygems.org",
+	"ghcr.io",
+	"docker.io",
 	"github.com",
 	"api.github.com",
 }

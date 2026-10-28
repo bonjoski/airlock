@@ -69,7 +69,7 @@ func TestDoctor_CheckPlatformSandbox_Darwin(t *testing.T) {
 		t.Fatalf("Expected at least 2 checks for darwin, got %d", len(results))
 	}
 
-	var foundExec, foundProfile bool
+	var foundExec, foundProfile, foundTrust bool
 	for _, res := range results {
 		if res.ID == "sandbox-seatbelt-exec" {
 			foundExec = true
@@ -83,6 +83,9 @@ func TestDoctor_CheckPlatformSandbox_Darwin(t *testing.T) {
 				t.Errorf("Expected sandbox-seatbelt-profile to pass, got %s: %s", res.Status, res.Details)
 			}
 		}
+		if res.ID == "sandbox-system-trust" {
+			foundTrust = true
+		}
 	}
 
 	if !foundExec {
@@ -90,6 +93,9 @@ func TestDoctor_CheckPlatformSandbox_Darwin(t *testing.T) {
 	}
 	if !foundProfile {
 		t.Error("Missing sandbox-seatbelt-profile check")
+	}
+	if runtime.GOOS == "darwin" && !foundTrust {
+		t.Error("Missing sandbox-system-trust check on darwin host")
 	}
 }
 
@@ -417,5 +423,103 @@ func TestDoctor_ReportFormatting(t *testing.T) {
 	colorText := report.FormatTerminal(true)
 	if !strings.Contains(colorText, "\033[32m") {
 		t.Error("FormatTerminal(true) missing ANSI color escape code")
+	}
+}
+
+func TestDoctor_CheckShimShadowing(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+
+	shimDir := filepath.Join(tempDir, "shims")
+	if err := os.MkdirAll(shimDir, 0755); err != nil {
+		t.Fatalf("failed to create shim dir: %v", err)
+	}
+
+	binA := filepath.Join(tempDir, "binA")
+	binB := filepath.Join(tempDir, "binB")
+	_ = os.MkdirAll(binA, 0755)
+	_ = os.MkdirAll(binB, 0755)
+
+	airlockBinaryName := "airlock"
+	if runtime.GOOS == "windows" {
+		airlockBinaryName += ".exe"
+	}
+
+	// 1. Plant an airlock binary inside the shim directory
+	airlockInShims := filepath.Join(shimDir, airlockBinaryName)
+	if err := os.WriteFile(airlockInShims, []byte("#!/bin/sh\necho airlock\n"), 0755); err != nil {
+		t.Fatalf("failed to create fake airlock in shims: %v", err)
+	}
+
+	// 2. Plant airlock in binA and binB to simulate $PATH shadowing
+	_ = os.WriteFile(filepath.Join(binA, airlockBinaryName), []byte("#!/bin/sh\necho binA\n"), 0755)
+	_ = os.WriteFile(filepath.Join(binB, airlockBinaryName), []byte("#!/bin/sh\necho binB\n"), 0755)
+
+	pathEnv := strings.Join([]string{binA, binB}, string(os.PathListSeparator))
+
+	opts := Options{
+		ShimDir: shimDir,
+		PathEnv: pathEnv,
+	}
+
+	results := CheckToolchainShims(ctx, opts)
+
+	var foundShimShadow, foundPathShadow bool
+	for _, res := range results {
+		if res.ID == "shims-shadowing-airlock" {
+			foundShimShadow = true
+			if res.Status != StatusWarn {
+				t.Errorf("Expected StatusWarn for shims-shadowing-airlock, got %s", res.Status)
+			}
+		}
+		if res.ID == "shims-path-shadowing" {
+			foundPathShadow = true
+			if res.Status != StatusWarn {
+				t.Errorf("Expected StatusWarn for shims-path-shadowing, got %s", res.Status)
+			}
+		}
+	}
+
+	if !foundShimShadow {
+		t.Error("Expected shims-shadowing-airlock check result")
+	}
+	if !foundPathShadow {
+		t.Error("Expected shims-path-shadowing check result")
+	}
+}
+
+func TestDoctor_CheckStoragePermissions_EcosystemCaches(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+
+	opts := Options{
+		HomeDir:       tempDir,
+		WorkspaceRoot: tempDir,
+		ScratchBase:   tempDir,
+		GOOS:          "darwin",
+	}
+
+	results := CheckStoragePermissions(ctx, opts)
+
+	expectedCaches := []string{
+		"storage-pnpm-store",
+		"storage-maven-cache",
+		"storage-gradle-cache",
+		"storage-nuget-cache",
+		"storage-gem-cache",
+		"storage-swiftpm-cache",
+		"storage-cocoapods-cache",
+		"storage-helm-cache",
+	}
+
+	foundMap := make(map[string]bool)
+	for _, res := range results {
+		foundMap[res.ID] = true
+	}
+
+	for _, expectedID := range expectedCaches {
+		if !foundMap[expectedID] {
+			t.Errorf("Expected %s check in CheckStoragePermissions", expectedID)
+		}
 	}
 }

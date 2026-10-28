@@ -13,6 +13,21 @@ func TestShimManager_Lifecycle(t *testing.T) {
 	tempDir := t.TempDir()
 	shimDir := filepath.Join(tempDir, "bin")
 
+	// Verify essential tools are in SupportedTools
+	expectedTools := []string{"go", "mvn", "gradle", "dotnet", "nuget", "gem", "bundle", "swift", "pod", "helm"}
+	for _, expected := range expectedTools {
+		found := false
+		for _, tool := range SupportedTools {
+			if tool == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Expected '%s' to be in SupportedTools", expected)
+		}
+	}
+
 	mgr := NewManager()
 
 	// 1. Install
