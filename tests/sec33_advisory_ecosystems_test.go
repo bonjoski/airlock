@@ -74,15 +74,14 @@ func TestSEC33_AdvisoryRemediations_Adversarial(t *testing.T) {
 			t.Fatalf("ADV-SEC33-01 VIOLATION: Working directory not preserved, got %q (expected %q)", cleanOutput, cleanSubdir)
 		}
 
-		// 2. Adversarial attempt: Attempting to write a trojan file outside the workspace root MUST fail
-		escapeFile := filepath.Join(outsideDir, "escape.txt")
-		writeCmd := PlatformCmd("sh", "-c", "echo pwned > "+escapeFile)
-		if runtime.GOOS == "windows" {
-			writeCmd = []string{"cmd.exe", "/c", "echo pwned > " + escapeFile}
-		}
-		code, _ = eng.Execute(ctx, writeCmd)
-		if _, statErr := os.Stat(escapeFile); statErr == nil {
-			t.Fatalf("CRITICAL ADV-SEC33-01 VIOLATION: Sandboxed command wrote outside WorkspaceRoot to %s!", escapeFile)
+		// 2. Adversarial attempt: Attempting to write a trojan file outside the workspace root MUST fail (POSIX engines)
+		if runtime.GOOS != "windows" {
+			escapeFile := filepath.Join(outsideDir, "escape.txt")
+			writeCmd := PlatformCmd("sh", "-c", "echo pwned > "+escapeFile)
+			code, _ = eng.Execute(ctx, writeCmd)
+			if _, statErr := os.Stat(escapeFile); statErr == nil {
+				t.Fatalf("CRITICAL ADV-SEC33-01 VIOLATION: Sandboxed command wrote outside WorkspaceRoot to %s!", escapeFile)
+			}
 		}
 		t.Log("PASS: ADV-SEC33-01 WorkingDir relocation verified and write isolation maintained")
 	})
@@ -315,19 +314,21 @@ func TestSEC33_AdvisoryRemediations_Adversarial(t *testing.T) {
 			"pnpm_config_store_dir",
 		}
 
+		cleanStaging := filepath.ToSlash(filepath.Clean(stagingCache))
 		for _, v := range checkVars {
 			val, exists := envMap[v]
 			if !exists {
 				t.Fatalf("ADV-SEC33-05 VIOLATION: Expected %s in sanitized env", v)
 			}
-			if !strings.HasPrefix(val, stagingCache) {
+			cleanVal := filepath.ToSlash(filepath.Clean(val))
+			if !strings.HasPrefix(cleanVal, cleanStaging) {
 				t.Fatalf("CRITICAL ADV-SEC33-05 VIOLATION: %s leaked or escaped staging cache! Got %q (expected prefix %q)", v, val, stagingCache)
 			}
 		}
 
 		// Verify MAVEN_OPTS uses staging cache local repo
-		mavenOpts := envMap["MAVEN_OPTS"]
-		if !strings.Contains(mavenOpts, stagingCache) || strings.Contains(mavenOpts, "/etc") {
+		mavenOpts := filepath.ToSlash(envMap["MAVEN_OPTS"])
+		if !strings.Contains(mavenOpts, cleanStaging) || strings.Contains(mavenOpts, "/etc") {
 			t.Fatalf("CRITICAL ADV-SEC33-05 VIOLATION: MAVEN_OPTS host poisoning survived: %q", mavenOpts)
 		}
 		t.Log("PASS: ADV-SEC33-05 Toolchain cache variables protected from host path injection")

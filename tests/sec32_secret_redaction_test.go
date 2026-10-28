@@ -69,7 +69,7 @@ func TestSEC32_SecretRedaction(t *testing.T) {
 		defer cancel()
 
 		fakeToken := "gh" + "p_" + strings.Repeat("9876", 9)
-		exitCode, err := engine.Execute(ctx, PlatformCmd("echo", "leaked token: "+fakeToken))
+		exitCode, err := engine.Execute(ctx, PlatformCmd("/bin/echo", "leaked token: "+fakeToken))
 		_ = redactingWriter.Close()
 
 		if err != nil {
