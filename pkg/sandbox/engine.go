@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/bonjoski/airlock/pkg/audit"
 	"github.com/bonjoski/airlock/pkg/proxy"
@@ -70,15 +71,31 @@ func NewEngine(opts Options) (Engine, error) {
 		opts.WorkspaceRoot = resolved
 	}
 
+	if opts.WorkingDir != "" {
+		if resolved, err := filepath.EvalSymlinks(opts.WorkingDir); err == nil {
+			opts.WorkingDir = resolved
+		}
+	}
+
 	if opts.WorkingDir == "" {
 		if cwd, err := os.Getwd(); err == nil {
-			opts.WorkingDir = cwd
+			if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+				cwd = resolved
+			}
+			rel, relErr := filepath.Rel(opts.WorkspaceRoot, cwd)
+			if relErr == nil && !strings.HasPrefix(rel, "..") && rel != ".." {
+				opts.WorkingDir = cwd
+			} else {
+				opts.WorkingDir = opts.WorkspaceRoot
+			}
 		} else {
 			opts.WorkingDir = opts.WorkspaceRoot
 		}
-	}
-	if resolved, err := filepath.EvalSymlinks(opts.WorkingDir); err == nil {
-		opts.WorkingDir = resolved
+	} else {
+		rel, relErr := filepath.Rel(opts.WorkspaceRoot, opts.WorkingDir)
+		if relErr != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+			opts.WorkingDir = opts.WorkspaceRoot
+		}
 	}
 
 	switch runtime.GOOS {
