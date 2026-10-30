@@ -88,16 +88,17 @@ Usage:
   airlock config validate [--config <path>]
   airlock shim install [--target <dir>]
   airlock shim uninstall [--target <dir>]
-  airlock doctor [--json] [--workspace <path>]
+  airlock doctor [--json] [--ai] [--workspace <path>]
   airlock audit [list|tail|stats|export] [flags]
   airlock mcp
   airlock version
 
 Flags:
-  --profile <name>      Execution profile (agent, strict, airgap, default)
+  --profile <name>      Execution profile (dev-agent, agent, strict, airgap, default)
   --microvm             Tier 2 Confinement via Aegisbox hypervisor MicroVM
   --lease-secret <keys> Comma-separated secrets to lease dynamically via Locksmith
   --session-ticket <tk> Session ticket for autonomous agent batch loops
+  --debug               Verbose diagnostics (e.g. static ELF capability pre-pass)
   --config <path>       Path to custom airlock.yaml declarative policy file
   --airgap              Total offline isolation (denies all outbound network traffic)
   --net                 Permit direct external outbound networking (development mode)
@@ -271,13 +272,15 @@ func handleRun(args []string) {
 		microvm        bool
 		leaseSecrets   string
 		sessionTicket  string
+		debug          bool
 	)
 
 	fs.StringVar(&configPath, "config", "", "Path to declarative policy file")
-	fs.StringVar(&profileName, "profile", "", "Execution profile: standard, agent, strict, airgap, default")
+	fs.StringVar(&profileName, "profile", "", "Execution profile: dev-agent, agent, standard, strict, airgap, default")
 	fs.BoolVar(&microvm, "microvm", false, "Tier 2 hypervisor MicroVM isolation via Aegisbox")
 	fs.StringVar(&leaseSecrets, "lease-secret", "", "Comma-separated secrets to lease via Locksmith")
 	fs.StringVar(&sessionTicket, "session-ticket", "", "Session ticket for batch agent sub-commands")
+	fs.BoolVar(&debug, "debug", false, "Enable verbose diagnostics (e.g. ELF pre-pass)")
 	fs.BoolVar(&airgap, "airgap", false, "Offline isolation")
 	fs.BoolVar(&allowDirectNet, "net", false, "Permit direct external network")
 	fs.StringVar(&allowDomains, "allow-domain", "", "Additional registry domains")
@@ -477,6 +480,7 @@ func handleRun(args []string) {
 	opts := sandbox.Options{
 		WorkspaceRoot:   resolvedWorkspace,
 		WorkingDir:      currentWorkingDir,
+		Profile:         profileName,
 		ConfigPath:      discoveredConfigPath,
 		Airgap:          airgap,
 		AllowDirectNet:  allowDirectNet,
@@ -497,6 +501,7 @@ func handleRun(args []string) {
 		PromptHandler:   promptHandler,
 		LeasedSecrets:   secretsToLease,
 		SessionTicket:   sessionTicket,
+		Debug:           debug,
 		Stdout:          redactingStdout,
 		Stderr:          redactingStderr,
 		Stdin:           os.Stdin,

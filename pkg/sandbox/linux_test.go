@@ -188,3 +188,61 @@ func TestLinuxEngine_NestedBypass(t *testing.T) {
 		t.Errorf("Expected exit code 0, got %d", code)
 	}
 }
+
+func TestLinuxEngine_BuildBwrapArgs_DevAgent(t *testing.T) {
+	tempDir := t.TempDir()
+	workspace := filepath.Join(tempDir, "workspace")
+	_ = os.Mkdir(workspace, 0755)
+
+	sc, err := scratch.New(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to create scratch: %v", err)
+	}
+	defer sc.Cleanup()
+
+	filter := seccomp.NewFilter()
+	seccompFile, err := filter.CreateFilterFile("amd64")
+	if err != nil {
+		t.Fatalf("CreateFilterFile failed: %v", err)
+	}
+	defer func() {
+		_ = seccompFile.Close()
+		_ = os.Remove(seccompFile.Name())
+	}()
+
+	opts := Options{
+		WorkspaceRoot:  workspace,
+		Profile:        "dev-agent",
+		Airgap:         false,
+		AllowDirectNet: false,
+	}
+
+	eng := &LinuxEngine{
+		opts:      opts,
+		bwrapPath: "/usr/bin/bwrap",
+		seccomp:   filter,
+		cacheMgr:  cache.NewManager(),
+	}
+
+	mockHome := filepath.Join(tempDir, "home")
+	args, err := eng.BuildBwrapArgs(sc, seccompFile, mockHome)
+	if err != nil {
+		t.Fatalf("BuildBwrapArgs failed: %v", err)
+	}
+
+	argsStr := strings.Join(args, " ")
+
+	// dev-agent profile must drop capabilities and mask host credentials & /proc/sys
+	if !strings.Contains(argsStr, "--cap-drop ALL") {
+		t.Errorf("dev-agent bwrap args missing --cap-drop ALL: %s", argsStr)
+	}
+	if !strings.Contains(argsStr, "/proc/sys") {
+		t.Errorf("dev-agent bwrap args missing /proc/sys masking: %s", argsStr)
+	}
+	if !strings.Contains(argsStr, filepath.Join(mockHome, ".ssh")) {
+		t.Errorf("dev-agent bwrap args missing ~/.ssh masking: %s", argsStr)
+	}
+	if !strings.Contains(argsStr, filepath.Join(mockHome, ".aws")) {
+		t.Errorf("dev-agent bwrap args missing ~/.aws masking: %s", argsStr)
+	}
+}

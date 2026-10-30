@@ -43,6 +43,7 @@ type SandboxOpts struct {
 	LeasedSecrets   []string            // Secret keys to dynamically lease via Locksmith ETX
 	LocksmithSocket string              // Explicit Locksmith socket path (optional)
 	SessionTicket   string              // Optional session ticket for batch execution
+	Debug           bool                // Verbose diagnostic logging (ELF pre-pass, etc.)
 	Stdout          io.Writer
 	Stderr          io.Writer
 	Stdin           io.Reader

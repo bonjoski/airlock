@@ -132,3 +132,48 @@ func TestMergeProfiles(t *testing.T) {
 		t.Fatalf("expected custom domain in merged config: %v", merged.Network.AllowDomains)
 	}
 }
+
+func TestGetBuiltinProfile_DevAgent(t *testing.T) {
+	for _, name := range []string{ProfileDevAgent, "dev_agent"} {
+		cfg, err := GetBuiltinProfile(name)
+		if err != nil {
+			t.Fatalf("expected profile %q to load, got error: %v", name, err)
+		}
+
+		if cfg.Mode != ModeStrict {
+			t.Fatalf("expected ModeStrict, got %s", cfg.Mode)
+		}
+
+		// Verify denied credential paths including ~/.config/gh and ~/.gnupg
+		expectedDenies := []string{"~/.ssh", "~/.aws", "~/.gnupg", "~/.kube", "~/.config/gh", ".env"}
+		for _, req := range expectedDenies {
+			found := false
+			for _, p := range cfg.Filesystem.DenyRead {
+				if p == req {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("dev-agent profile missing required deny path %q: %v", req, cfg.Filesystem.DenyRead)
+			}
+		}
+
+		// Verify AI model domains
+		hasAnthropic := false
+		for _, d := range cfg.Network.AllowDomains {
+			if d == "api.anthropic.com" {
+				hasAnthropic = true
+				break
+			}
+		}
+		if !hasAnthropic {
+			t.Fatalf("dev-agent profile missing api.anthropic.com in allow_domains")
+		}
+
+		// Verify vetting is enforced
+		if !cfg.Vetting.Enable || !cfg.Vetting.Strict {
+			t.Fatalf("dev-agent profile must enforce strict vetting")
+		}
+	}
+}

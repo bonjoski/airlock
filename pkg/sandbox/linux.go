@@ -270,6 +270,28 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 		args = append(args, "--seccomp", "3")
 	}
 
+	// dev-agent profile extra hardening: capability dropping and credential masking
+	if strings.EqualFold(l.opts.Profile, "dev-agent") || strings.EqualFold(l.opts.Profile, "dev_agent") {
+		args = append(args,
+			"--cap-drop", "ALL",
+			"--ro-bind-try", unreadableMask, "/proc/sys",
+			"--ro-bind-try", unreadableMask, "/proc/kcore",
+		)
+		if userHome != "" {
+			devAgentDenies := []string{
+				filepath.Join(userHome, ".ssh"),
+				filepath.Join(userHome, ".aws"),
+				filepath.Join(userHome, ".gnupg"),
+				filepath.Join(userHome, ".kube"),
+				filepath.Join(userHome, ".config", "gh"),
+				filepath.Join(userHome, ".config", "gcloud"),
+			}
+			for _, target := range devAgentDenies {
+				args = append(args, "--ro-bind-try", unreadableMask, target)
+			}
+		}
+	}
+
 	// Ensure child terminates when supervisor exits
 	args = append(args, "--die-with-parent", "--")
 
@@ -361,6 +383,18 @@ func (l *LinuxEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 		proxyURL = prx.URL()
 		if dp := prx.DNSPort(); dp > 0 {
 			dnsAddr = fmt.Sprintf("127.0.0.1:%d", dp)
+		}
+	}
+
+	// 4b. Static ELF Pre-Pass: inspect binary symbols to prune unneeded network syscalls
+	targetBin := cmdArgs[0]
+	if resolvedPath, err := exec.LookPath(targetBin); err == nil {
+		targetBin = resolvedPath
+	}
+	if elfRes, err := seccomp.AnalyzeELF(targetBin, runtime.GOARCH); err == nil && elfRes != nil && elfRes.Prunable {
+		l.seccomp.PruneSyscalls(elfRes.PrunedSyscallNrs)
+		if os.Getenv("AIRLOCK_DEBUG") == "1" || l.opts.Debug {
+			fmt.Fprintf(l.resolveStderr(), "airlock: [ELF-Analyze] No network symbols found. Pruned %d socket syscalls from BPF filter.\n", len(elfRes.PrunedSyscallNrs))
 		}
 	}
 

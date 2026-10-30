@@ -78,14 +78,41 @@ type Filter interface {
 	CompileInstructions(arch string) ([]SockFilter, error)
 	WriteTo(w io.Writer, arch string) error
 	CreateFilterFile(arch string) (*os.File, error)
+	PruneSyscalls(syscalls []uint32)
 }
 
 // BPFFilter implements the Filter interface for process isolation.
-type BPFFilter struct{}
+type BPFFilter struct {
+	extraBlocked []uint32
+}
 
 // NewFilter creates a new seccomp BPF filter synthesizer.
 func NewFilter() *BPFFilter {
 	return &BPFFilter{}
+}
+
+// NewFilterWithBlocked creates a filter with additional pre-blocked syscalls.
+func NewFilterWithBlocked(extra []uint32) *BPFFilter {
+	return &BPFFilter{
+		extraBlocked: append([]uint32(nil), extra...),
+	}
+}
+
+// AddBlocked adds additional architecture-specific syscall numbers to the blocked set.
+func (f *BPFFilter) AddBlocked(syscalls ...uint32) {
+	f.extraBlocked = append(f.extraBlocked, syscalls...)
+}
+
+// PruneSyscalls blocks the specified syscall numbers in the synthesized BPF program.
+func (f *BPFFilter) PruneSyscalls(syscalls []uint32) {
+	f.AddBlocked(syscalls...)
+}
+
+// BlockedSyscalls returns a copy of dynamically blocked syscall numbers.
+func (f *BPFFilter) BlockedSyscalls() []uint32 {
+	res := make([]uint32, len(f.extraBlocked))
+	copy(res, f.extraBlocked)
+	return res
 }
 
 // GetSyscallConfig returns architecture-specific syscall numbers for Linux x86_64 or aarch64.
@@ -139,6 +166,21 @@ func (f *BPFFilter) CompileInstructions(arch string) ([]SockFilter, error) {
 		return nil, fmt.Errorf("seccomp: failed to get syscall config: %w", err)
 	}
 
+	blocked := make([]uint32, 0, len(cfg.Blocked)+len(f.extraBlocked))
+	seen := make(map[uint32]bool)
+	for _, nr := range cfg.Blocked {
+		if !seen[nr] {
+			blocked = append(blocked, nr)
+			seen[nr] = true
+		}
+	}
+	for _, nr := range f.extraBlocked {
+		if !seen[nr] {
+			blocked = append(blocked, nr)
+			seen[nr] = true
+		}
+	}
+
 	// Calculate instruction layout
 	// 0: Load arch
 	// 1: JEQ AuditArch -> skip 1 (go to 3) else go to 2
@@ -152,7 +194,7 @@ func (f *BPFFilter) CompileInstructions(arch string) ([]SockFilter, error) {
 	// [4+len(Blocked)+4]: RET ALLOW (safe ioctl)
 	// [4+len(Blocked)+5]: RET ERRNO (deny)
 
-	numBlocked := len(cfg.Blocked)
+	numBlocked := len(blocked)
 	idxIoctlCheck := 4 + numBlocked
 	idxAllowNonIoctl := idxIoctlCheck + 1
 	idxLoadIoctlCmd := idxAllowNonIoctl + 1
@@ -176,7 +218,7 @@ func (f *BPFFilter) CompileInstructions(arch string) ([]SockFilter, error) {
 	)
 
 	// 3. Blocked syscalls check
-	for i, syscallNr := range cfg.Blocked {
+	for i, syscallNr := range blocked {
 		currIdx := 4 + i
 		jt := uint8(idxDeny - currIdx - 1)
 		instructions = append(instructions,

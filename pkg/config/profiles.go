@@ -9,6 +9,7 @@ import (
 const (
 	ProfileStandard = "standard"
 	ProfileAgent    = "agent"
+	ProfileDevAgent = "dev-agent"
 	ProfileDefault  = "default"
 	ProfileStrict   = "strict"
 	ProfileAirgap   = "airgap"
@@ -103,6 +104,27 @@ var AgentDefaultSecrets = []string{
 	"GEMINI_API_KEY",
 }
 
+// DevAgentDefaultDenyPaths defines forbidden host credential directories for dev-agent.
+var DevAgentDefaultDenyPaths = []string{
+	"~/.ssh",
+	"~/.aws",
+	"~/.gnupg",
+	"~/.kube",
+	"~/.config/gh",
+	"~/.config/gcloud",
+	"/var/run/docker.sock",
+	".env",
+	".env.*",
+}
+
+// DevAgentDefaultSecrets lists credentials dynamically leased via Locksmith ETX for dev-agent.
+var DevAgentDefaultSecrets = []string{
+	"OPENAI_API_KEY",
+	"ANTHROPIC_API_KEY",
+	"GITHUB_TOKEN",
+	"GEMINI_API_KEY",
+}
+
 // GetBuiltinProfile constructs a pre-configured, hardened policy for known execution profiles.
 func GetBuiltinProfile(name string) (*Config, error) {
 	norm := strings.ToLower(strings.TrimSpace(name))
@@ -174,8 +196,34 @@ func GetBuiltinProfile(name string) (*Config, error) {
 
 		return cfg, nil
 
+	case ProfileDevAgent, "dev_agent":
+		cfg := DefaultConfig()
+		cfg.Version = "1"
+		cfg.Mode = ModeStrict
+
+		// 1. Network: Pinned AI endpoints and package registries only
+		cfg.Network.Airgap = false
+		cfg.Network.AllowDomains = make([]string, len(AgentDefaultAllowDomains))
+		copy(cfg.Network.AllowDomains, AgentDefaultAllowDomains)
+		cfg.Network.UnknownDomainAction = "refused"
+
+		// 2. Filesystem: Explicit boundary blocks for credentials and metadata (including ~/.config/gh)
+		cfg.Filesystem.DenyRead = make([]string, len(DevAgentDefaultDenyPaths))
+		copy(cfg.Filesystem.DenyRead, DevAgentDefaultDenyPaths)
+		cfg.Filesystem.DenyWrite = append(cfg.Filesystem.DenyRead, ".git")
+
+		// 3. Static Analysis: Mandatory pre-execution AST inspection via Argus
+		cfg.Vetting.Enable = true
+		cfg.Vetting.Strict = true
+
+		// 4. Interactive: Non-interactive fail-closed defaults for autonomous loops
+		cfg.Interactive.PromptOnUnknownDomain = false
+		cfg.Interactive.PromptTimeoutSec = 5
+
+		return cfg, nil
+
 	default:
-		return nil, fmt.Errorf("unknown execution profile %q (available: standard, agent, strict, airgap, default)", name)
+		return nil, fmt.Errorf("unknown execution profile %q (available: standard, agent, dev-agent, strict, airgap, default)", name)
 	}
 }
 

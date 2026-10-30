@@ -14,6 +14,7 @@ import (
 func handleDoctor(args []string) {
 	fs := flag.NewFlagSet("airlock doctor", flag.ExitOnError)
 	jsonOutput := fs.Bool("json", false, "Output diagnostic report in JSON format")
+	aiOutput := fs.Bool("ai", false, "Analyze diagnostic findings with sovereign Shield-protected AI")
 	workspace := fs.String("workspace", "", "Override workspace root directory")
 	_ = fs.Parse(args)
 
@@ -42,6 +43,16 @@ func handleDoctor(args []string) {
 		detector := pty.NewDetector()
 		useColor := detector.IsTerminal(os.Stdout)
 		fmt.Print(report.FormatTerminal(useColor))
+	}
+
+	if *aiOutput {
+		advisory, err := report.GenerateAIAdvisory(context.Background())
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "airlock doctor: AI advisory failed: %v\n", err)
+		} else {
+			fmt.Println("\n[Shield Protected AI Advisory]")
+			fmt.Println(advisory)
+		}
 	}
 
 	if !report.Healthy {
