@@ -1,0 +1,21 @@
+# Airlock
+
+> Minimalist Workstation Sandbox for Untrusted Package Installs & AI Coding Agents.
+
+## Core Capabilities
+- Sub-15ms Kernel Confinement: Instant process sandboxing with zero background daemons or VM boot overhead.
+- macOS Containment: In-memory compiled Apple Seatbelt profiles denying sensitive files (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/Library/Keychains`).
+- Linux Containment: Landlock LSM path-based access control and seccomp-bpf syscall filters.
+- Model Context Protocol: `airlock-mcp` exposes sandboxed execution tools directly to AI agent hosts (Claude Desktop, Antigravity).
+
+## CLI Usage
+- `airlock run -- <command>`: Executes command under kernel-enforced sandboxing.
+- `airlock run --profile strict -- <command>`: Runs with elevated isolation profile.
+- `airlock doctor`: Verifies host kernel LSM / Seatbelt capabilities.
+- `airlock audit --last`: Displays security events and blocked filesystem/syscall attempts.
+- `airlock-mcp --config airlock.yaml`: Launches Model Context Protocol stdio server.
+
+## Configuration & Paths
+- Policy File: `airlock.yaml` (network domains, env pass-through, filesystem read/write)
+- Audit Log: `~/.airlock/audit.log`
+- Documentation: `docs/knowledge-base/02-airlock.md` in repo `spanreed`
