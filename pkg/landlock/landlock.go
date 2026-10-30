@@ -44,7 +44,7 @@ const (
 	AccessFSTruncate   = 1 << 14
 	AccessFSIoctlDev   = 1 << 15
 
-	AccessFSRead = AccessFSExecute | AccessFSReadFile | AccessFSReadDir
+	AccessFSRead  = AccessFSExecute | AccessFSReadFile | AccessFSReadDir
 	AccessFSWrite = AccessFSWriteFile | AccessFSRemoveDir | AccessFSRemoveFile |
 		AccessFSMakeChar | AccessFSMakeDir | AccessFSMakeReg | AccessFSMakeSock |
 		AccessFSMakeFifo | AccessFSMakeBlock | AccessFSMakeSym | AccessFSRefer | AccessFSTruncate
