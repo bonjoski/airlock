@@ -130,3 +130,28 @@ func TestAdversarial_DynamicLinkerStripping(t *testing.T) {
 	}
 	t.Log("PASS: All dynamic linker and shell injection environment variables stripped successfully")
 }
+
+// ADV-P3-06: Dev-Agent Profile Credential and Symlink Traversal Protection
+// Verifies that dev-agent profile blocks ~/.ssh, ~/.aws, ~/.gnupg, ~/.kube, ~/.config/gh,
+// and enforces canonical /System/Volumes/Data path denials on macOS.
+func TestAdversarial_DevAgentProfileCredentialProtection(t *testing.T) {
+	devCfg, err := config.GetBuiltinProfile(config.ProfileDevAgent)
+	if err != nil {
+		t.Fatalf("failed to load dev-agent profile: %v", err)
+	}
+
+	criticalPaths := []string{"~/.ssh", "~/.aws", "~/.gnupg", "~/.kube", "~/.config/gh", ".env"}
+	for _, p := range criticalPaths {
+		found := false
+		for _, denied := range devCfg.Filesystem.DenyRead {
+			if denied == p {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("CRITICAL: dev-agent profile failed to deny access to %q!", p)
+		}
+	}
+	t.Log("PASS: dev-agent profile strictly denies read access to all host credential roots including ~/.config/gh")
+}

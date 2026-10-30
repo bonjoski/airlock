@@ -4,17 +4,24 @@ package seatbelt
 
 import (
 	"bytes"
+	_ "embed"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"text/template"
 )
 
+//go:embed dev-agent.sb
+var devAgentProfileTemplate string
+
 // Params contains parameters interpolated into the Seatbelt Scheme profile.
 type Params struct {
+	Profile              string
 	UserHome             string
+	UserHomeData         string
 	WorkspaceRoot        string
 	WorkspaceRootEscaped string
 	ScratchDir           string
@@ -202,7 +209,17 @@ func (g *ProfileGenerator) Generate(p Params) (string, error) {
 	// Escape WorkspaceRoot for regex use
 	p.WorkspaceRootEscaped = regexp.QuoteMeta(p.WorkspaceRoot)
 
-	tmpl, err := template.New("seatbelt").Parse(profileTemplate)
+	// Determine physical data volume path on macOS (/System/Volumes/Data/Users/...)
+	if strings.HasPrefix(p.UserHome, "/Users/") {
+		p.UserHomeData = path.Join("/System/Volumes/Data", filepath.ToSlash(p.UserHome))
+	}
+
+	selectedTemplate := profileTemplate
+	if strings.EqualFold(p.Profile, "dev-agent") || strings.EqualFold(p.Profile, "dev_agent") {
+		selectedTemplate = devAgentProfileTemplate
+	}
+
+	tmpl, err := template.New("seatbelt").Parse(selectedTemplate)
 	if err != nil {
 		return "", fmt.Errorf("seatbelt: failed to parse template: %w", err)
 	}
@@ -213,4 +230,10 @@ func (g *ProfileGenerator) Generate(p Params) (string, error) {
 	}
 
 	return buf.String(), nil
+}
+
+// GenerateDevAgent renders the dedicated dev-agent Seatbelt profile.
+func (g *ProfileGenerator) GenerateDevAgent(p Params) (string, error) {
+	p.Profile = "dev-agent"
+	return g.Generate(p)
 }

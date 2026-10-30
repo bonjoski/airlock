@@ -140,6 +140,7 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 	}
 
 	seatbeltParams := seatbelt.Params{
+		Profile:         m.opts.Profile,
 		UserHome:        homeDir,
 		WorkspaceRoot:   m.opts.WorkspaceRoot,
 		ScratchDir:      sc.Root(),

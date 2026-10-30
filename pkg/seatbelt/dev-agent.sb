@@ -1,0 +1,138 @@
+;; Airlock Hardened Confinement Policy — Profile: dev-agent
+;; Spec: RFC-2026-10-30-02 (Trojanized Developer Agent & Extension Confinement)
+(version 1)
+(deny default)
+
+;; 1. Core Process Lifecycle & System Discovery
+(allow process-fork)
+(allow process-exec)
+(allow sysctl-read)
+
+;; Deny execution of macOS Keychain CLI
+(deny process-exec
+  (literal "/usr/bin/security")
+  (subpath "/usr/bin/security"))
+
+;; Process Introspection Denial (ADV-02 / RFC-2026-10-30-02)
+(deny process-info* (target others))
+
+;; 2. Terminal and Pseudo-Device I/O & File Locking
+(allow file-read* file-write*
+  (literal "/dev/null")
+  (literal "/dev/zero")
+  (literal "/dev/random")
+  (literal "/dev/urandom")
+  (literal "/dev/dtracehelper")
+  (regex #"^/dev/tty.*")
+  (regex #"^/dev/ptmx.*"))
+
+(allow file-lock)
+(allow ipc-posix-shm*)
+
+;; 3. Mach IPC Hardening (Neutralize Keychain, LaunchServices, Clipboard, TCC)
+(deny mach-lookup
+  (global-name "com.apple.securityd")
+  (global-name "com.apple.CoreAuthentication.daemon")
+  (global-name "com.apple.accountsd")
+  (global-name "com.apple.keychainsharingreferent")
+  (global-name "com.apple.coreservices.launchservicesd")
+  (global-name "com.apple.pasteboard.pboard")
+  (global-name "com.apple.tccd"))
+
+(allow mach-lookup
+  (global-name "com.apple.system.logger")
+  (global-name "com.apple.system.notification_center")
+  (global-name "com.apple.trustd.agent")
+  (global-name "com.apple.trustd"))
+
+;; 4. Filesystem Read Policy: Allow system reads, but strictly block host and workspace credentials
+(allow file-read*)
+{{range .ExtraAllowRead}}
+(allow file-read* (subpath "{{.}}"))
+{{end}}
+
+;; Block host credentials (Explicit Evaluated Absolute Paths & Canonical Data Volume)
+(deny file-read* file-write*
+  (subpath "{{.UserHome}}/.ssh")
+  (subpath "{{.UserHome}}/.aws")
+  (subpath "{{.UserHome}}/.gnupg")
+  (subpath "{{.UserHome}}/.kube")
+  (subpath "{{.UserHome}}/.config/gh")
+  (subpath "{{.UserHome}}/.config/gcloud"))
+
+{{if .UserHomeData}}
+(deny file-read* file-write*
+  (subpath "{{.UserHomeData}}/.ssh")
+  (subpath "{{.UserHomeData}}/.aws")
+  (subpath "{{.UserHomeData}}/.gnupg")
+  (subpath "{{.UserHomeData}}/.kube")
+  (subpath "{{.UserHomeData}}/.config/gh")
+  (subpath "{{.UserHomeData}}/.config/gcloud"))
+{{end}}
+
+;; Fallback defense-in-depth regex for non-standard user profiles and volume mounts
+(deny file-read* file-write*
+  (regex #"^(/System/Volumes/Data)?/(Users|home)/[^/]+/\.(ssh|aws|gnupg|kube|config/gh|config/gcloud)"))
+
+;; Block Docker daemon socket (V-06: Localhost Pivoting)
+(deny file-read* file-write*
+  (literal "/var/run/docker.sock")
+  (literal "/private/var/run/docker.sock"))
+
+;; Mask project secret files in workspace
+(deny file-read*
+  (subpath "{{.WorkspaceRoot}}/.env")
+  (regex #"^{{.WorkspaceRootEscaped}}/\.env(\..+)?$")
+  (regex #"^{{.WorkspaceRootEscaped}}/.*\.pem$")
+  (regex #"^{{.WorkspaceRootEscaped}}/.*\.key$")
+  (regex #"^{{.WorkspaceRootEscaped}}/(id_rsa|id_ed25519).*$")
+  (regex #"^{{.WorkspaceRootEscaped}}/secrets\.json$"))
+{{range .ExtraDenyRead}}
+(deny file-read* (subpath "{{.}}"))
+{{end}}
+
+;; Permit CA certificate bundles inside workspace/virtualenvs even if named .pem
+(allow file-read*
+  (regex #"^{{.WorkspaceRootEscaped}}/(.*/)?(certifi|_vendor/certifi)/cacert\.pem$")
+  (regex #"^{{.WorkspaceRootEscaped}}/(.*/)?cacert.*\.pem$")
+  (regex #"^{{.WorkspaceRootEscaped}}/(.*/)?ca-certificates?/.*\.pem$")
+  (regex #"^{{.WorkspaceRootEscaped}}/(.*/)?(ca-bundle|tls-ca-bundle)\.pem$"))
+
+;; 5. Filesystem Write Policy: Strictly confined to Workspace, Scratch, and System Temp
+(deny file-write*)
+
+(allow file-write*
+  (subpath "{{.WorkspaceRoot}}")
+  (subpath "{{.ScratchDir}}")
+  (subpath "/tmp")
+  (subpath "/private/tmp"))
+{{range .ExtraAllowWrite}}
+(allow file-write* (subpath "{{.}}"))
+{{end}}
+
+;; Block access to launchd listeners in /tmp (V-10: ssh-agent socket protection)
+(deny file-read* file-write*
+  (regex #"^(/private)?/tmp/com\.apple\.launchd\..*"))
+
+;; Prevent Workspace poisoning: protect .git directory from modification
+(deny file-write*
+  (subpath "{{.WorkspaceRoot}}/.git"))
+{{range .ExtraDenyWrite}}
+(deny file-write* (subpath "{{.}}"))
+{{end}}
+
+;; 6. Network Egress Policy
+{{if .Airgap}}
+(deny network*)
+{{else if gt .ProxyPort 0}}
+;; Kernel-Enforced Egress Proxy: Deny external; permit ONLY to local proxy port
+(deny network*)
+(allow network-outbound (to tcp "localhost:{{.ProxyPort}}"))
+(allow network-inbound (local tcp "localhost:{{.ProxyPort}}"))
+{{else if .AllowDirectNet}}
+;; Direct external networking permitted for development
+(allow network-outbound (to tcp "*:443") (to tcp "*:80"))
+(allow network-outbound (to udp "*:53"))
+{{else}}
+(deny network*)
+{{end}}
