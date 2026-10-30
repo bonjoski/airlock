@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -210,7 +211,7 @@ func (g *ProfileGenerator) Generate(p Params) (string, error) {
 
 	// Determine physical data volume path on macOS (/System/Volumes/Data/Users/...)
 	if strings.HasPrefix(p.UserHome, "/Users/") {
-		p.UserHomeData = filepath.Join("/System/Volumes/Data", p.UserHome)
+		p.UserHomeData = path.Join("/System/Volumes/Data", filepath.ToSlash(p.UserHome))
 	}
 
 	selectedTemplate := profileTemplate

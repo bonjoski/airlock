@@ -3,6 +3,7 @@
 package profile
 
 import (
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -66,7 +67,7 @@ func AugmentBwrapArgsForDevAgent(args []string, userHome string, unreadableMask 
 		if userHome != "" {
 			for _, deny := range DevAgentDefaultDenyPaths {
 				if strings.HasPrefix(deny, "~/") {
-					target := filepath.Join(userHome, deny[2:])
+					target := path.Join(filepath.ToSlash(userHome), deny[2:])
 					args = append(args, "--ro-bind-try", unreadableMask, target)
 				}
 			}
