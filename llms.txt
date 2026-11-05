@@ -1,21 +1,21 @@
 # Airlock
 
-> Minimalist Workstation Sandbox for Untrusted Package Installs & AI Coding Agents.
+> Sub-15ms zero-trust workstation sandbox for AI coding agents and package managers using Apple Seatbelt, Landlock LSM, and seccomp.
 
 ## Core Capabilities
-- Sub-15ms Kernel Confinement: Instant process sandboxing with zero background daemons or VM boot overhead.
-- macOS Containment: In-memory compiled Apple Seatbelt profiles denying sensitive files (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/Library/Keychains`).
-- Linux Containment: Landlock LSM path-based access control and seccomp-bpf syscall filters.
-- Model Context Protocol: `airlock-mcp` exposes sandboxed execution tools directly to AI agent hosts (Claude Desktop, Antigravity).
+- Sub-15ms Cold Start: Executes directly via kernel containment primitives without virtualization or daemon overhead.
+- Platform Native Sandboxing: Apple Seatbelt (`sandbox-exec`) on macOS, Landlock LSM and seccomp-bpf on Linux.
+- 18+ Package Manager Profiles: Out-of-the-box isolation for npm, pnpm, yarn, bun, pip, uv, cargo, go, maven, gradle, swift, dotnet.
+- Strict Credential Quarantine: Denies reads and writes to `~/.ssh`, `~/.aws`, `~/.gnupg`, Keychains.
+- Model Context Protocol (MCP) Server: Stdio MCP tool provider for AI coding assistants.
 
 ## CLI Usage
-- `airlock run -- <command>`: Executes command under kernel-enforced sandboxing.
-- `airlock run --profile strict -- <command>`: Runs with elevated isolation profile.
-- `airlock doctor`: Verifies host kernel LSM / Seatbelt capabilities.
-- `airlock audit --last`: Displays security events and blocked filesystem/syscall attempts.
-- `airlock-mcp --config airlock.yaml`: Launches Model Context Protocol stdio server.
+- `airlock run -- <command>`: Executes command under kernel-enforced sandbox.
+- `airlock run --profile <name> -- <command>`: Forces specific isolation profile.
+- `airlock doctor`: Probes host kernel sandbox features and capabilities.
+- `airlock audit --last`: Displays recent denied syscalls and file access attempts.
 
-## Configuration & Paths
-- Policy File: `airlock.yaml` (network domains, env pass-through, filesystem read/write)
+## Key Files & Paths
 - Audit Log: `~/.airlock/audit.log`
-- Documentation: `docs/knowledge-base/02-airlock.md` in repo `spanreed`
+- Configuration: `airlock.yaml`
+- Parent Runbook: `docs/knowledge-base/02-airlock.md` in repository `spanreed`
