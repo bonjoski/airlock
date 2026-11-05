@@ -1,6 +1,5 @@
 # Claude Code Guidelines for `airlock`
 
-> **Authoritative Ecosystem Runbook:** [`spanreed/docs/knowledge-base/02-airlock.md`](file:///Users/benskolmoski/code/spanreed/docs/knowledge-base/02-airlock.md)
 
 ## Build & Test Commands
 - **Build Binary:** `go build -o bin/airlock ./cmd/airlock`

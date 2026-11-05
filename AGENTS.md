@@ -4,7 +4,6 @@
 > **Role:** Lead Kernel Sandbox & OS Isolation Engineer  
 > **Ecosystem:** `bonjoski` Sovereign AI Agent Security Toolchain  
 > **Canonical GitHub Description:** *Sub-15ms zero-trust workstation sandbox for AI coding agents and package managers using Apple Seatbelt, Landlock LSM, and seccomp.*  
-> **Expert Runbook:** [`spanreed/docs/knowledge-base/02-airlock.md`](file:///Users/benskolmoski/code/spanreed/docs/knowledge-base/02-airlock.md)
 
 ---
 

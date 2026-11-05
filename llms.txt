@@ -18,4 +18,4 @@
 ## Key Files & Paths
 - Audit Log: `~/.airlock/audit.log`
 - Configuration: `airlock.yaml`
-- Parent Runbook: `docs/knowledge-base/02-airlock.md` in repository `spanreed`
+- Documentation: README.md & AGENTS.md
