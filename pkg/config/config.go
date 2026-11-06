@@ -34,9 +34,12 @@ type Config struct {
 
 // NetworkConfig defines outbound network egress policy.
 type NetworkConfig struct {
-	Airgap              bool     `yaml:"airgap" json:"airgap"`
-	AllowDomains        []string `yaml:"allow_domains" json:"allow_domains"`
-	UnknownDomainAction string   `yaml:"unknown_domain_action" json:"unknown_domain_action"` // "prompt", "nxdomain", "refused"
+	Airgap               bool     `yaml:"airgap" json:"airgap"`
+	AllowDomains         []string `yaml:"allow_domains" json:"allow_domains"`
+	UnknownDomainAction  string   `yaml:"unknown_domain_action" json:"unknown_domain_action"` // "prompt", "nxdomain", "refused"
+	AntiLoopback         bool     `yaml:"anti_loopback" json:"anti_loopback"`
+	AllowedUnixSockets   []string `yaml:"allowed_unix_sockets" json:"allowed_unix_sockets"`
+	AllowedLoopbackPorts []int    `yaml:"allowed_loopback_ports" json:"allowed_loopback_ports"`
 }
 
 // EnvConfig defines environment variable pass-through rules.

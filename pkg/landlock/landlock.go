@@ -82,12 +82,13 @@ type Ruleset struct {
 
 // Config specifies input directories for synthesizing a Landlock ruleset.
 type Config struct {
-	WorkspaceRoot   string
-	ScratchDir      string
-	UserHome        string
-	ExtraAllowRead  []string
-	ExtraAllowWrite []string
-	ExtraDenyRead   []string
+	WorkspaceRoot      string
+	ScratchDir         string
+	UserHome           string
+	ExtraAllowRead     []string
+	ExtraAllowWrite    []string
+	ExtraDenyRead      []string
+	AllowedUnixSockets []string
 }
 
 // DevAgentDefaultDenyPaths lists credentials and secrets forbidden in dev-agent profile.
@@ -180,6 +181,15 @@ func BuildDevAgentRuleset(cfg Config) *Ruleset {
 	}
 	for _, p := range cfg.ExtraAllowWrite {
 		cleaned := strings.TrimSpace(p)
+		if cleaned != "" {
+			rs.Rules = append(rs.Rules, PathRule{
+				Path:   cleaned,
+				Access: AccessFSAll,
+			})
+		}
+	}
+	for _, sock := range cfg.AllowedUnixSockets {
+		cleaned := strings.TrimSpace(sock)
 		if cleaned != "" {
 			rs.Rules = append(rs.Rules, PathRule{
 				Path:   cleaned,

@@ -32,6 +32,9 @@ type Params struct {
 	ExtraAllowWrite      []string
 	ExtraDenyRead        []string
 	ExtraDenyWrite       []string
+	AntiLoopback         bool
+	AllowedUnixSockets   []string
+	AllowedLoopbackPorts []int
 }
 
 // Generator defines the interface for generating platform confinement profiles.
@@ -166,6 +169,34 @@ const profileTemplate = `;; Airlock Hardened Confinement Policy
 {{else}}
 (deny network*)
 {{end}}
+
+{{if .AntiLoopback}}
+;; Anti-Loopback Confinement (CVE-2026-25253: Mitigate OpenClaw loopback control-plane pivoting)
+;; Deny network-outbound to localhost / 127.0.0.1 / [::1] control planes
+(deny network-outbound
+  (to ip "localhost:*")
+  (to tcp "localhost:8080")
+  (to tcp "localhost:9090")
+  (to tcp "localhost:2375")
+  (to tcp "localhost:11434"))
+{{if gt .ProxyPort 0}}
+;; Re-allow supervisor egress proxy port
+(allow network-outbound (to tcp "localhost:{{.ProxyPort}}"))
+(allow network-inbound (local tcp "localhost:{{.ProxyPort}}"))
+{{end}}
+{{range .AllowedLoopbackPorts}}
+(allow network-outbound (to tcp "localhost:{{.}}"))
+{{end}}
+{{end}}
+
+{{if .AllowedUnixSockets}}
+(allow network-outbound (remote unix-socket))
+{{range .AllowedUnixSockets}}
+;; Whitelisted Unix Domain Sockets (CVE-2026-25253: explicit IPC whitelist)
+(allow network-outbound (literal "{{.}}") (subpath "{{.}}"))
+(allow file-read* file-write* (literal "{{.}}") (subpath "{{.}}"))
+{{end}}
+{{end}}
 `
 
 // Generate renders the hardened Seatbelt Scheme profile string.
@@ -205,6 +236,17 @@ func (g *ProfileGenerator) Generate(p Params) (string, error) {
 	p.ExtraAllowWrite = expandPath(p.ExtraAllowWrite)
 	p.ExtraDenyRead = expandPath(p.ExtraDenyRead)
 	p.ExtraDenyWrite = expandPath(p.ExtraDenyWrite)
+	p.AllowedUnixSockets = expandPath(p.AllowedUnixSockets)
+
+	// Anti-loopback is default enabled for agent profiles and anti-loopback profile
+	if strings.EqualFold(p.Profile, "anti-loopback") ||
+		strings.EqualFold(p.Profile, "anti_loopback") ||
+		strings.EqualFold(p.Profile, "dev-agent") ||
+		strings.EqualFold(p.Profile, "dev_agent") ||
+		strings.EqualFold(p.Profile, "agent") ||
+		strings.EqualFold(p.Profile, "strict-agent") {
+		p.AntiLoopback = true
+	}
 
 	// Escape WorkspaceRoot for regex use
 	p.WorkspaceRootEscaped = regexp.QuoteMeta(p.WorkspaceRoot)
@@ -235,5 +277,12 @@ func (g *ProfileGenerator) Generate(p Params) (string, error) {
 // GenerateDevAgent renders the dedicated dev-agent Seatbelt profile.
 func (g *ProfileGenerator) GenerateDevAgent(p Params) (string, error) {
 	p.Profile = "dev-agent"
+	return g.Generate(p)
+}
+
+// GenerateAntiLoopback renders the dedicated anti-loopback Seatbelt profile.
+func (g *ProfileGenerator) GenerateAntiLoopback(p Params) (string, error) {
+	p.Profile = "anti-loopback"
+	p.AntiLoopback = true
 	return g.Generate(p)
 }

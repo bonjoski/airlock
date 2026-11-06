@@ -139,18 +139,28 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 		return 1, fmt.Errorf("sandbox: failed to resolve user home directory: %w", err)
 	}
 
+	antiLoopback := m.opts.AntiLoopback
+	if m.opts.Profile == "anti-loopback" || m.opts.Profile == "anti_loopback" ||
+		m.opts.Profile == "dev-agent" || m.opts.Profile == "dev_agent" ||
+		m.opts.Profile == "agent" || m.opts.Profile == "strict-agent" {
+		antiLoopback = true
+	}
+
 	seatbeltParams := seatbelt.Params{
-		Profile:         m.opts.Profile,
-		UserHome:        homeDir,
-		WorkspaceRoot:   m.opts.WorkspaceRoot,
-		ScratchDir:      sc.Root(),
-		Airgap:          m.opts.Airgap,
-		ProxyPort:       proxyPort,
-		AllowDirectNet:  m.opts.AllowDirectNet,
-		ExtraAllowRead:  m.opts.ExtraAllowRead,
-		ExtraAllowWrite: m.opts.ExtraAllowWrite,
-		ExtraDenyRead:   m.opts.ExtraDenyRead,
-		ExtraDenyWrite:  m.opts.ExtraDenyWrite,
+		Profile:              m.opts.Profile,
+		UserHome:             homeDir,
+		WorkspaceRoot:        m.opts.WorkspaceRoot,
+		ScratchDir:           sc.Root(),
+		Airgap:               m.opts.Airgap,
+		ProxyPort:            proxyPort,
+		AllowDirectNet:       m.opts.AllowDirectNet,
+		AntiLoopback:         antiLoopback,
+		AllowedUnixSockets:   m.opts.AllowedUnixSockets,
+		AllowedLoopbackPorts: m.opts.AllowedLoopbackPorts,
+		ExtraAllowRead:       m.opts.ExtraAllowRead,
+		ExtraAllowWrite:      m.opts.ExtraAllowWrite,
+		ExtraDenyRead:        m.opts.ExtraDenyRead,
+		ExtraDenyWrite:       m.opts.ExtraDenyWrite,
 	}
 
 	profileStr, err := m.generator.Generate(seatbeltParams)

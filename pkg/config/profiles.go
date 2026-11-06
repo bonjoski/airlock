@@ -7,12 +7,13 @@ import (
 
 // Standard Profile Names
 const (
-	ProfileStandard = "standard"
-	ProfileAgent    = "agent"
-	ProfileDevAgent = "dev-agent"
-	ProfileDefault  = "default"
-	ProfileStrict   = "strict"
-	ProfileAirgap   = "airgap"
+	ProfileStandard     = "standard"
+	ProfileAgent        = "agent"
+	ProfileDevAgent     = "dev-agent"
+	ProfileDefault      = "default"
+	ProfileStrict       = "strict"
+	ProfileAirgap       = "airgap"
+	ProfileAntiLoopback = "anti-loopback"
 )
 
 // StandardDefaultAllowDomains lists the essential registries and code repositories
@@ -177,6 +178,7 @@ func GetBuiltinProfile(name string) (*Config, error) {
 
 		// 1. Network: Pinned AI endpoints and package registries only
 		cfg.Network.Airgap = false
+		cfg.Network.AntiLoopback = true
 		cfg.Network.AllowDomains = make([]string, len(AgentDefaultAllowDomains))
 		copy(cfg.Network.AllowDomains, AgentDefaultAllowDomains)
 		cfg.Network.UnknownDomainAction = "refused"
@@ -203,6 +205,7 @@ func GetBuiltinProfile(name string) (*Config, error) {
 
 		// 1. Network: Pinned AI endpoints and package registries only
 		cfg.Network.Airgap = false
+		cfg.Network.AntiLoopback = true
 		cfg.Network.AllowDomains = make([]string, len(AgentDefaultAllowDomains))
 		copy(cfg.Network.AllowDomains, AgentDefaultAllowDomains)
 		cfg.Network.UnknownDomainAction = "refused"
@@ -222,8 +225,35 @@ func GetBuiltinProfile(name string) (*Config, error) {
 
 		return cfg, nil
 
+	case ProfileAntiLoopback, "anti_loopback", "strict-agent", "strict_agent":
+		cfg := DefaultConfig()
+		cfg.Version = "1"
+		cfg.Mode = ModeStrict
+
+		// 1. Network: Strict Anti-Loopback Confinement (CVE-2026-25253)
+		cfg.Network.Airgap = false
+		cfg.Network.AntiLoopback = true
+		cfg.Network.AllowDomains = make([]string, len(AgentDefaultAllowDomains))
+		copy(cfg.Network.AllowDomains, AgentDefaultAllowDomains)
+		cfg.Network.UnknownDomainAction = "refused"
+
+		// 2. Filesystem: Explicit boundary blocks for credentials and metadata
+		cfg.Filesystem.DenyRead = make([]string, len(DevAgentDefaultDenyPaths))
+		copy(cfg.Filesystem.DenyRead, DevAgentDefaultDenyPaths)
+		cfg.Filesystem.DenyWrite = append(cfg.Filesystem.DenyRead, ".git")
+
+		// 3. Static Analysis: Mandatory pre-execution AST inspection via Argus
+		cfg.Vetting.Enable = true
+		cfg.Vetting.Strict = true
+
+		// 4. Interactive: Non-interactive fail-closed defaults for autonomous loops
+		cfg.Interactive.PromptOnUnknownDomain = false
+		cfg.Interactive.PromptTimeoutSec = 5
+
+		return cfg, nil
+
 	default:
-		return nil, fmt.Errorf("unknown execution profile %q (available: standard, agent, dev-agent, strict, airgap, default)", name)
+		return nil, fmt.Errorf("unknown execution profile %q (available: standard, agent, dev-agent, strict, airgap, anti-loopback, default)", name)
 	}
 }
 
@@ -249,6 +279,16 @@ func MergeProfiles(base *Config, overlay *Config) *Config {
 	}
 	if overlay.Network.UnknownDomainAction != "" {
 		merged.Network.UnknownDomainAction = overlay.Network.UnknownDomainAction
+	}
+
+	if overlay.Network.AntiLoopback {
+		merged.Network.AntiLoopback = true
+	}
+	if len(overlay.Network.AllowedUnixSockets) > 0 {
+		merged.Network.AllowedUnixSockets = append(merged.Network.AllowedUnixSockets, overlay.Network.AllowedUnixSockets...)
+	}
+	if len(overlay.Network.AllowedLoopbackPorts) > 0 {
+		merged.Network.AllowedLoopbackPorts = append(merged.Network.AllowedLoopbackPorts, overlay.Network.AllowedLoopbackPorts...)
 	}
 
 	if len(overlay.Env.Allow) > 0 {

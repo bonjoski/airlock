@@ -149,9 +149,22 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 		"--unshare-uts",
 	}
 
-	// Network Namespace Detachment (V-09: Isolates network in Airgap mode)
-	if l.opts.Airgap {
+	// Network Namespace Detachment (V-09: Isolates network in Airgap and Anti-Loopback modes)
+	if l.opts.Airgap || l.opts.AntiLoopback ||
+		strings.EqualFold(l.opts.Profile, "anti-loopback") ||
+		strings.EqualFold(l.opts.Profile, "anti_loopback") ||
+		strings.EqualFold(l.opts.Profile, "agent") ||
+		strings.EqualFold(l.opts.Profile, "dev-agent") ||
+		strings.EqualFold(l.opts.Profile, "dev_agent") ||
+		strings.EqualFold(l.opts.Profile, "strict-agent") {
 		args = append(args, "--unshare-net")
+	}
+
+	// Whitelisted Unix Domain Sockets (CVE-2026-25253: explicit IPC whitelist)
+	for _, sock := range l.opts.AllowedUnixSockets {
+		if sock != "" {
+			args = append(args, "--bind-try", sock, sock)
+		}
 	}
 
 	// System Toolchains & Runtimes (Read-Only)

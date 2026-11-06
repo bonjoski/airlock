@@ -22,9 +22,12 @@ type SandboxOpts struct {
 	WorkingDir      string // Preserved working directory for executed commands
 	Profile         string // Execution profile ("standard", "agent", "strict", "airgap", "default")
 	ConfigPath      string
-	Airgap          bool
-	AllowDirectNet  bool
-	AllowedDomains  []string
+	Airgap               bool
+	AllowDirectNet       bool
+	AntiLoopback         bool
+	AllowedUnixSockets   []string
+	AllowedLoopbackPorts []int
+	AllowedDomains       []string
 	KeepEnv         []string
 	DenyEnv         []string
 	ExtraAllowRead  []string
