@@ -16,6 +16,7 @@ func handleDoctor(args []string) {
 	jsonOutput := fs.Bool("json", false, "Output diagnostic report in JSON format")
 	aiOutput := fs.Bool("ai", false, "Analyze diagnostic findings with sovereign Shield-protected AI")
 	workspace := fs.String("workspace", "", "Override workspace root directory")
+	fixMode := fs.Bool("fix", false, "Automatically repair misconfigured shims, permissions, and declarative policy")
 	_ = fs.Parse(args)
 
 	resolvedWorkspace := *workspace
@@ -26,10 +27,34 @@ func handleDoctor(args []string) {
 		}
 	}
 
-	report, err := doctor.RunAllChecks(context.Background(), resolvedWorkspace)
+	opts := doctor.Options{
+		WorkspaceRoot: resolvedWorkspace,
+	}
+
+	detector := pty.NewDetector()
+	useColor := detector.IsTerminal(os.Stdout)
+
+	var fixReport *doctor.FixReport
+	if *fixMode {
+		var fixErr error
+		fixReport, fixErr = doctor.AutoFix(context.Background(), opts)
+		if fixErr != nil {
+			fmt.Fprintf(os.Stderr, "airlock doctor: auto-remediation error: %v\n", fixErr)
+		}
+		if fixReport != nil && !*jsonOutput {
+			fmt.Print(fixReport.FormatTerminal(useColor))
+			fmt.Println()
+		}
+	}
+
+	report, err := doctor.RunChecks(context.Background(), opts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "airlock doctor: diagnostic execution failed: %v\n", err)
 		os.Exit(1)
+	}
+
+	if fixReport != nil {
+		report.FixReport = fixReport
 	}
 
 	if *jsonOutput {
@@ -40,8 +65,6 @@ func handleDoctor(args []string) {
 		}
 		fmt.Println(string(data))
 	} else {
-		detector := pty.NewDetector()
-		useColor := detector.IsTerminal(os.Stdout)
 		fmt.Print(report.FormatTerminal(useColor))
 	}
 

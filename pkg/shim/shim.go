@@ -29,7 +29,9 @@ type ShimStatus struct {
 type Manager interface {
 	Install(targetDir string) ([]string, error)
 	Uninstall(targetDir string) error
+	UninstallTool(targetDir string, tool string) error
 	List(targetDir string) ([]ShimStatus, error)
+	ListWithPath(targetDir string, pathVar string) ([]ShimStatus, error)
 	DefaultShimDir() (string, error)
 }
 
@@ -98,15 +100,44 @@ func (m *DefaultManager) Uninstall(targetDir string) error {
 	}
 
 	for _, tool := range SupportedTools {
-		shimPath := filepath.Join(targetDir, tool)
+		if err := m.UninstallTool(targetDir, tool); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// UninstallTool removes the shim for a specific tool from targetDir.
+func (m *DefaultManager) UninstallTool(targetDir string, tool string) error {
+	if targetDir == "" {
+		def, err := m.DefaultShimDir()
+		if err != nil {
+			return err
+		}
+		targetDir = def
+	}
+
+	cleanTargetDir := filepath.Clean(targetDir)
+	cleanTool := filepath.Clean(tool)
+	if filepath.Base(cleanTool) != cleanTool || strings.Contains(tool, "..") || strings.Contains(tool, "/") || strings.Contains(tool, "\\") {
+		return fmt.Errorf("shim: invalid tool name %q: path traversal rejected", tool)
+	}
+
+	shimPath := filepath.Join(cleanTargetDir, cleanTool)
+	if fi, err := os.Lstat(shimPath); err == nil {
+		if fi.IsDir() {
+			return fmt.Errorf("shim: %s is a directory, refusing to remove", shimPath)
+		}
 		if err := os.Remove(shimPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("shim: failed to remove %s: %w", shimPath, err)
 		}
+	}
 
-		cmdPath := filepath.Join(targetDir, tool+".cmd")
-		if err := os.Remove(cmdPath); err != nil && !os.IsNotExist(err) {
-			// Best-effort cleanup for Windows cmd wrapper
-			_ = err
+	cmdPath := filepath.Join(cleanTargetDir, cleanTool+".cmd")
+	if fi, err := os.Lstat(cmdPath); err == nil {
+		if !fi.IsDir() {
+			_ = os.Remove(cmdPath)
 		}
 	}
 
@@ -115,6 +146,11 @@ func (m *DefaultManager) Uninstall(targetDir string) error {
 
 // List inspects targetDir and returns the status of each supported tool.
 func (m *DefaultManager) List(targetDir string) ([]ShimStatus, error) {
+	return m.ListWithPath(targetDir, os.Getenv("PATH"))
+}
+
+// ListWithPath inspects targetDir and returns the status of each supported tool using pathVar.
+func (m *DefaultManager) ListWithPath(targetDir string, pathVar string) ([]ShimStatus, error) {
 	if targetDir == "" {
 		def, err := m.DefaultShimDir()
 		if err != nil {
@@ -140,7 +176,7 @@ func (m *DefaultManager) List(targetDir string) ([]ShimStatus, error) {
 		}
 
 		// Locate host executable outside of shim directory
-		if hostBin := findHostBinary(tool, targetDir); hostBin != "" {
+		if hostBin := findHostBinaryWithPath(tool, targetDir, pathVar); hostBin != "" {
 			status.TargetHostBinary = hostBin
 		}
 
@@ -151,7 +187,13 @@ func (m *DefaultManager) List(targetDir string) ([]ShimStatus, error) {
 }
 
 func findHostBinary(tool string, shimDir string) string {
-	pathVar := os.Getenv("PATH")
+	return findHostBinaryWithPath(tool, shimDir, os.Getenv("PATH"))
+}
+
+func findHostBinaryWithPath(tool string, shimDir string, pathVar string) string {
+	if pathVar == "" {
+		pathVar = os.Getenv("PATH")
+	}
 	entries := filepath.SplitList(pathVar)
 	cleanShimDir := filepath.Clean(shimDir)
 
@@ -177,10 +219,12 @@ func findHostBinary(tool string, shimDir string) string {
 		}
 	}
 
-	// Fallback to exec.LookPath
-	if p, err := exec.LookPath(tool); err == nil {
-		if filepath.Clean(filepath.Dir(p)) != cleanShimDir {
-			return p
+	// Fallback to exec.LookPath if searching standard system PATH
+	if pathVar == os.Getenv("PATH") {
+		if p, err := exec.LookPath(tool); err == nil {
+			if filepath.Clean(filepath.Dir(p)) != cleanShimDir {
+				return p
+			}
 		}
 	}
 

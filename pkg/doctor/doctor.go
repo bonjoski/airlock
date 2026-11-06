@@ -51,6 +51,7 @@ type Report struct {
 	Warnings      int           `json:"warnings"`
 	Failures      int           `json:"failures"`
 	Results       []CheckResult `json:"results"`
+	FixReport     *FixReport    `json:"fix_report,omitempty"`
 }
 
 // Options configures the doctor diagnostic engine.
@@ -661,7 +662,11 @@ func CheckToolchainShims(ctx context.Context, opts Options) []CheckResult {
 
 	// 2. Active Shim Inventory
 	mgr := shim.NewManager()
-	shims, err := mgr.List(shimDir)
+	pathVar := opts.PathEnv
+	if pathVar == "" {
+		pathVar = os.Getenv("PATH")
+	}
+	shims, err := mgr.ListWithPath(shimDir, pathVar)
 	if err != nil {
 		results = append(results, CheckResult{
 			ID:             "shims-inventory",
@@ -731,7 +736,7 @@ func CheckToolchainShims(ctx context.Context, opts Options) []CheckResult {
 	}
 
 	// 4. Detect multiple airlock binaries in $PATH causing upgrade shadowing
-	pathVar := opts.PathEnv
+	pathVar = opts.PathEnv
 	if pathVar == "" {
 		pathVar = os.Getenv("PATH")
 	}
