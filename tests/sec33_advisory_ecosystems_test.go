@@ -192,9 +192,9 @@ func TestSEC33_AdvisoryRemediations_Adversarial(t *testing.T) {
 			secretMap[filepath.Base(s)] = true
 		}
 
-		// cacert.pem MUST NOT be masked
-		if secretMap["cacert.pem"] {
-			t.Fatal("ADV-SEC33-03 VIOLATION: cacert.pem was incorrectly flagged as secret!")
+		// AIR-05: cacert*.pem inside workspace MUST also be masked (no .pem carve-out; system /etc/ssl/cert.pem is used)
+		if !secretMap["cacert.pem"] {
+			t.Fatal("AIR-05 VIOLATION: workspace cacert.pem was NOT masked by FindWorkspaceSecrets!")
 		}
 
 		// Sensitive private keys MUST be masked
@@ -216,13 +216,13 @@ func TestSEC33_AdvisoryRemediations_Adversarial(t *testing.T) {
 			t.Fatalf("failed to generate profile: %v", err)
 		}
 
-		if !strings.Contains(sbpl, "cacert") || !strings.Contains(sbpl, "ca-bundle") {
-			t.Fatal("ADV-SEC33-03 VIOLATION: Seatbelt profile missing CA bundle exception regex")
+		if strings.Contains(sbpl, "cacert") || strings.Contains(sbpl, "ca-bundle") {
+			t.Fatal("AIR-05 VIOLATION: Seatbelt profile still contains workspace cacert*.pem carve-out")
 		}
 		if !strings.Contains(sbpl, `.*\.pem$`) || !strings.Contains(sbpl, `.*\.key$`) {
 			t.Fatal("CRITICAL ADV-SEC33-03 VIOLATION: Seatbelt profile missing general .pem/.key denial!")
 		}
-		t.Log("PASS: ADV-SEC33-03 CA bundle exemption verified and private key secret masking intact")
+		t.Log("PASS: ADV-SEC33-03 / AIR-05 workspace .pem/.key secret masking intact with zero carve-outs")
 	})
 
 	// ADV-SEC33-04: /tmp Shared Memory & Launchd Socket Tamper Resistance (F4)

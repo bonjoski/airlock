@@ -4,7 +4,7 @@ package version
 
 var (
 	// Version is the current semantic version of Airlock.
-	Version = "0.10.2"
+	Version = "0.10.3"
 
 	// Commit is the git commit SHA injected at build time via -ldflags.
 	Commit = "unknown"

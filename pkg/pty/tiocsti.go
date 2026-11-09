@@ -6,16 +6,25 @@ package pty
 import (
 	"errors"
 	"os"
+	"runtime"
 	"syscall"
 	"unsafe"
 )
 
 // TIOCSTI constant across POSIX kernels
 const (
-	// TIOCSTI Linux / Darwin ioctl request code
-	TIOCSTI_DARWIN = 0x80017417
+	// TIOCSTI Darwin/BSD (_IOW('t', 114, char)) and Linux ioctl request codes
+	TIOCSTI_DARWIN = 0x80017472
 	TIOCSTI_LINUX  = 0x5412
 )
+
+// TIOCSTIRequest returns the platform-appropriate TIOCSTI ioctl opcode.
+func TIOCSTIRequest(goos string) uintptr {
+	if goos == "linux" {
+		return TIOCSTI_LINUX
+	}
+	return TIOCSTI_DARWIN
+}
 
 // CheckTIOCSTI attempts to push a character into the terminal buffer to test
 // if the terminal queue injection vulnerability (V-05) is actively neutralized.
@@ -26,11 +35,12 @@ func CheckTIOCSTI(f *os.File) error {
 	}
 
 	char := byte('\n')
+	req := TIOCSTIRequest(runtime.GOOS)
 	// We test standard TIOCSTI ioctl
 	_, _, err := syscall.Syscall(
 		syscall.SYS_IOCTL,
 		f.Fd(),
-		TIOCSTI_DARWIN,
+		req,
 		uintptr(unsafe.Pointer(&char)),
 	)
 	if err != 0 {

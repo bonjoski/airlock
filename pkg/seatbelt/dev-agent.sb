@@ -3,6 +3,9 @@
 (version 1)
 (deny default)
 
+(define workspace-root (if (param "WORKSPACE_ROOT") (param "WORKSPACE_ROOT") "{{.WorkspaceRoot}}"))
+(define scratch-dir (if (param "SCRATCH_DIR") (param "SCRATCH_DIR") "{{.ScratchDir}}"))
+
 ;; 1. Core Process Lifecycle & System Discovery
 (allow process-fork)
 (allow process-exec)
@@ -26,6 +29,9 @@
   (regex #"^/dev/tty.*")
   (regex #"^/dev/ptmx.*"))
 
+;; Block controlling terminal ioctl injection such as TIOCSTI (AIR-06 / V-05)
+(deny file-ioctl (literal "/dev/tty"))
+
 (allow file-lock)
 (allow ipc-posix-shm*)
 
@@ -45,80 +51,94 @@
   (global-name "com.apple.trustd.agent")
   (global-name "com.apple.trustd"))
 
-;; 4. Filesystem Read Policy: Allow system reads, but strictly block host and workspace credentials
+;; 4. Filesystem Read Policy: Allow system reads; denials follow all allows below
 (allow file-read*)
 {{range .ExtraAllowRead}}
 (allow file-read* (subpath "{{.}}"))
 {{end}}
 
-;; Block host credentials (Explicit Evaluated Absolute Paths & Canonical Data Volume)
-(deny file-read* file-write*
-  (subpath "{{.UserHome}}/.ssh")
-  (subpath "{{.UserHome}}/.aws")
-  (subpath "{{.UserHome}}/.gnupg")
-  (subpath "{{.UserHome}}/.kube")
-  (subpath "{{.UserHome}}/.config/gh")
-  (subpath "{{.UserHome}}/.config/gcloud"))
-
-{{if .UserHomeData}}
-(deny file-read* file-write*
-  (subpath "{{.UserHomeData}}/.ssh")
-  (subpath "{{.UserHomeData}}/.aws")
-  (subpath "{{.UserHomeData}}/.gnupg")
-  (subpath "{{.UserHomeData}}/.kube")
-  (subpath "{{.UserHomeData}}/.config/gh")
-  (subpath "{{.UserHomeData}}/.config/gcloud"))
-{{end}}
-
-;; Fallback defense-in-depth regex for non-standard user profiles and volume mounts
-(deny file-read* file-write*
-  (regex #"^(/System/Volumes/Data)?/(Users|home)/[^/]+/\.(ssh|aws|gnupg|kube|config/gh|config/gcloud)"))
-
-;; Block Docker daemon socket (V-06: Localhost Pivoting)
-(deny file-read* file-write*
-  (literal "/var/run/docker.sock")
-  (literal "/private/var/run/docker.sock"))
-
-;; Mask project secret files in workspace
-(deny file-read*
-  (subpath "{{.WorkspaceRoot}}/.env")
-  (regex #"^{{.WorkspaceRootEscaped}}/\.env(\..+)?$")
-  (regex #"^{{.WorkspaceRootEscaped}}/.*\.pem$")
-  (regex #"^{{.WorkspaceRootEscaped}}/.*\.key$")
-  (regex #"^{{.WorkspaceRootEscaped}}/(id_rsa|id_ed25519).*$")
-  (regex #"^{{.WorkspaceRootEscaped}}/secrets\.json$"))
-{{range .ExtraDenyRead}}
-(deny file-read* (subpath "{{.}}"))
-{{end}}
-
-;; Permit CA certificate bundles inside workspace/virtualenvs even if named .pem
-(allow file-read*
-  (regex #"^{{.WorkspaceRootEscaped}}/(.*/)?(certifi|_vendor/certifi)/cacert\.pem$")
-  (regex #"^{{.WorkspaceRootEscaped}}/(.*/)?cacert.*\.pem$")
-  (regex #"^{{.WorkspaceRootEscaped}}/(.*/)?ca-certificates?/.*\.pem$")
-  (regex #"^{{.WorkspaceRootEscaped}}/(.*/)?(ca-bundle|tls-ca-bundle)\.pem$"))
-
 ;; 5. Filesystem Write Policy: Strictly confined to Workspace, Scratch, and System Temp
 (deny file-write*)
 
 (allow file-write*
-  (subpath "{{.WorkspaceRoot}}")
-  (subpath "{{.ScratchDir}}")
+  (subpath workspace-root)
+  (subpath scratch-dir)
   (subpath "/tmp")
   (subpath "/private/tmp"))
 {{range .ExtraAllowWrite}}
 (allow file-write* (subpath "{{.}}"))
 {{end}}
 
+;; 5b. High-Precedence Credential, Secret & Metadata Denials (AIR-01 / AIR-05)
+;; Placed strictly AFTER all file-read* and file-write* allows so denials always win.
+
+;; Block host credentials (Explicit Evaluated Absolute Paths & Canonical Data Volume)
+(deny file-read* file-write* file-link
+  (subpath "{{.UserHome}}/.ssh")
+  (subpath "{{.UserHome}}/.aws")
+  (subpath "{{.UserHome}}/.gnupg")
+  (subpath "{{.UserHome}}/.kube")
+  (subpath "{{.UserHome}}/.docker")
+  (subpath "{{.UserHome}}/.fabrial")
+  (subpath "{{.UserHome}}/.config/gh")
+  (subpath "{{.UserHome}}/.config/gcloud")
+  (literal "{{.UserHome}}/.npmrc")
+  (subpath "{{.UserHome}}/.npmrc")
+  (literal "{{.UserHome}}/.pypirc")
+  (subpath "{{.UserHome}}/.pypirc")
+  (literal "{{.UserHome}}/.netrc")
+  (subpath "{{.UserHome}}/.netrc"))
+
+{{if .UserHomeData}}
+(deny file-read* file-write* file-link
+  (subpath "{{.UserHomeData}}/.ssh")
+  (subpath "{{.UserHomeData}}/.aws")
+  (subpath "{{.UserHomeData}}/.gnupg")
+  (subpath "{{.UserHomeData}}/.kube")
+  (subpath "{{.UserHomeData}}/.docker")
+  (subpath "{{.UserHomeData}}/.fabrial")
+  (subpath "{{.UserHomeData}}/.config/gh")
+  (subpath "{{.UserHomeData}}/.config/gcloud")
+  (literal "{{.UserHomeData}}/.npmrc")
+  (subpath "{{.UserHomeData}}/.npmrc")
+  (literal "{{.UserHomeData}}/.pypirc")
+  (subpath "{{.UserHomeData}}/.pypirc")
+  (literal "{{.UserHomeData}}/.netrc")
+  (subpath "{{.UserHomeData}}/.netrc"))
+{{end}}
+
+;; Fallback defense-in-depth regex for non-standard user profiles and volume mounts
+(deny file-read* file-write* file-link
+  (regex #"^(/System/Volumes/Data)?/(Users|home)/[^/]+/\.(ssh|aws|gnupg|kube|docker|fabrial|npmrc|pypirc|netrc|config/gh|config/gcloud)"))
+
+;; Block Docker daemon socket (V-06: Localhost Pivoting)
+(deny file-read* file-write* file-link
+  (literal "/var/run/docker.sock")
+  (literal "/private/var/run/docker.sock"))
+
 ;; Block access to launchd listeners in /tmp (V-10: ssh-agent socket protection)
-(deny file-read* file-write*
+(deny file-read* file-write* file-link
   (regex #"^(/private)?/tmp/com\.apple\.launchd\..*"))
 
-;; Prevent Workspace poisoning: protect .git directory from modification
-(deny file-write*
+;; Mask project secret files across workspace and all subdirectories (AIR-05: strict .pem/.key masking)
+(deny file-read* file-write* file-link
+  (subpath (string-append workspace-root "/.env"))
+  (subpath "{{.WorkspaceRoot}}/.env")
+  (regex (string-append "^" "{{.WorkspaceRootEscaped}}" #"/(.*/)?\.env(\..+)?$"))
+  (regex (string-append "^" "{{.WorkspaceRootEscaped}}" #"/.*\.pem$"))
+  (regex (string-append "^" "{{.WorkspaceRootEscaped}}" #"/.*\.key$"))
+  (regex (string-append "^" "{{.WorkspaceRootEscaped}}" #"/(.*/)?(id_rsa|id_ed25519|id_ecdsa|id_dsa).*$"))
+  (regex (string-append "^" "{{.WorkspaceRootEscaped}}" #"/(.*/)?(secrets|service-account)\.json$")))
+{{range .ExtraDenyRead}}
+(deny file-read* file-link (subpath "{{.}}"))
+{{end}}
+
+;; Prevent Workspace poisoning: protect .git directory from modification or hardlinking
+(deny file-write* file-link
+  (subpath (string-append workspace-root "/.git"))
   (subpath "{{.WorkspaceRoot}}/.git"))
 {{range .ExtraDenyWrite}}
-(deny file-write* (subpath "{{.}}"))
+(deny file-write* file-link (subpath "{{.}}"))
 {{end}}
 
 ;; 6. Network Egress Policy

@@ -137,7 +137,9 @@ func (m *DefaultManager) UninstallTool(targetDir string, tool string) error {
 	cmdPath := filepath.Join(cleanTargetDir, cleanTool+".cmd")
 	if fi, err := os.Lstat(cmdPath); err == nil {
 		if !fi.IsDir() {
-			_ = os.Remove(cmdPath)
+			if rmErr := os.Remove(cmdPath); rmErr != nil && !os.IsNotExist(rmErr) {
+				return fmt.Errorf("shim: failed to remove %s: %w", cmdPath, rmErr)
+			}
 		}
 	}
 

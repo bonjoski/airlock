@@ -45,6 +45,11 @@ func NewRunner() Runner {
 	return &DefaultRunner{}
 }
 
+// IsKernelSandboxed reports whether the current process is confined inside an active OS kernel sandbox.
+func IsKernelSandboxed() bool {
+	return isKernelSandboxed()
+}
+
 // Execute executes a command inside the Airlock sandbox in-process.
 func (r *DefaultRunner) Execute(ctx context.Context, cmd []string, opts SandboxOpts) (*ExecResult, error) {
 	if len(cmd) == 0 {
@@ -88,18 +93,16 @@ func (r *DefaultRunner) Execute(ctx context.Context, cmd []string, opts SandboxO
 				DurationMs: time.Since(start).Milliseconds(),
 			}, err
 		}
-		if loadedCfg != nil {
+		if config.IsUntrustedWorkspaceConfigPath(opts.ConfigPath, workspaceRoot) {
+			loadedCfg, _ = config.AttenuateWorkspaceConfig(loadedCfg, cfg, workspaceRoot)
+		} else if loadedCfg != nil {
 			loadedCfg = config.MergeProfiles(loadedCfg, cfg)
 		} else {
 			loadedCfg = cfg
 		}
 	} else if workspaceRoot != "" {
-		if _, cfg, _, err := config.DiscoverConfigWithIssues(workspaceRoot); err == nil && cfg != nil {
-			if loadedCfg != nil {
-				loadedCfg = config.MergeProfiles(loadedCfg, cfg)
-			} else {
-				loadedCfg = cfg
-			}
+		if _, cfg, _, err := config.DiscoverAndMergeConfig(loadedCfg, workspaceRoot); err == nil && cfg != nil {
+			loadedCfg = cfg
 		}
 	}
 
@@ -125,6 +128,13 @@ func (r *DefaultRunner) Execute(ctx context.Context, cmd []string, opts SandboxO
 
 		if loadedCfg.Network.Airgap && !effectiveOpts.AllowDirectNet {
 			effectiveOpts.Airgap = true
+		}
+		if loadedCfg.Network.AntiLoopback {
+			effectiveOpts.AntiLoopback = true
+		}
+		effectiveOpts.AllowedUnixSockets = mergeUniqueStrings(effectiveOpts.AllowedUnixSockets, loadedCfg.Network.AllowedUnixSockets)
+		if len(loadedCfg.Network.AllowedLoopbackPorts) > 0 {
+			effectiveOpts.AllowedLoopbackPorts = append(effectiveOpts.AllowedLoopbackPorts, loadedCfg.Network.AllowedLoopbackPorts...)
 		}
 		effectiveOpts.AllowedDomains = mergeUniqueStrings(effectiveOpts.AllowedDomains, loadedCfg.Network.AllowDomains)
 		effectiveOpts.KeepEnv = mergeUniqueStrings(effectiveOpts.KeepEnv, loadedCfg.Env.Allow)

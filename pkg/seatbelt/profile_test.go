@@ -70,9 +70,9 @@ func TestProfileGenerator_Generate(t *testing.T) {
 		t.Errorf("Profile missing file-lock allowance")
 	}
 
-	// 9. Must permit CA certificate bundles inside workspace (F3)
-	if !strings.Contains(profile, `cacert\.pem`) {
-		t.Errorf("Profile missing cacert.pem allowance rule")
+	// 9. Must NOT contain the removed workspace cacert*.pem carve-out (AIR-05)
+	if strings.Contains(profile, `cacert.*\.pem`) {
+		t.Errorf("Profile must not contain workspace cacert*.pem carve-out (AIR-05)")
 	}
 }
 
@@ -204,8 +204,8 @@ func TestProfileGenerator_GenerateDevAgent(t *testing.T) {
 		t.Errorf("dev-agent profile missing /usr/bin/security denial")
 	}
 
-	// 5. Must mask workspace secrets (.env, etc.)
-	if !strings.Contains(profile, `secrets\.json`) {
+	// 5. Must mask workspace secrets (.env, secrets.json, etc.)
+	if !strings.Contains(profile, `(secrets|service-account)\.json`) {
 		t.Errorf("dev-agent profile missing secrets.json mask")
 	}
 }

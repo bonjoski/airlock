@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -172,34 +171,11 @@ func (h *DefaultResourceHandler) readPolicyActive(ctx context.Context) (*ReadRes
 	var configPath string
 	var issues []config.ValidationIssue
 
-	if workspace != "" {
-		for _, name := range config.ConfigFileNames {
-			p := filepath.Join(workspace, name)
-			if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-				cfg, iss, err := config.LoadFromFileWithIssues(p)
-				if err == nil && cfg != nil {
-					loadedCfg = cfg
-					configPath = p
-					issues = iss
-					break
-				}
-			}
-		}
-	}
-
-	if loadedCfg == nil {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			globalPath := filepath.Join(home, ".airlock", "config.yaml")
-			if fi, err := os.Stat(globalPath); err == nil && !fi.IsDir() {
-				cfg, iss, err := config.LoadFromFileWithIssues(globalPath)
-				if err == nil && cfg != nil {
-					loadedCfg = cfg
-					configPath = globalPath
-					issues = iss
-				}
-			}
-		}
+	p, cfg, iss, err := config.DiscoverAndMergeConfig(nil, workspace)
+	if err == nil && cfg != nil {
+		loadedCfg = cfg
+		configPath = p
+		issues = iss
 	}
 
 	if loadedCfg == nil {

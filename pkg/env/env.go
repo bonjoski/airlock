@@ -25,21 +25,17 @@ var SafeEnvAllowlist = map[string]bool{
 	"SHELL":           true,
 	"CI":              true,
 	"DEBIAN_FRONTEND": true,
-	"SSL_CERT_FILE":   true,
-	"SSL_CERT_DIR":    true,
-	// Modern Language Runtimes: Go
+	// Modern Language Runtimes: Go (AIR-08: GOFLAGS, GOPROXY excluded to prevent build/proxy hijacking)
 	"GODEBUG":     true,
 	"GOROOT":      true,
 	"GOPATH":      true,
 	"GOCACHE":     true,
 	"GOMODCACHE":  true,
-	"GOPROXY":     true,
 	"GONOSUMDB":   true,
 	"GOPRIVATE":   true,
 	"CGO_ENABLED": true,
 	"GOOS":        true,
 	"GOARCH":      true,
-	"GOFLAGS":     true,
 
 	// Modern Language Runtimes: Rust
 	"CARGO_HOME":       true,
@@ -48,16 +44,12 @@ var SafeEnvAllowlist = map[string]bool{
 	"RUST_BACKTRACE":   true,
 	"CARGO_TARGET_DIR": true,
 
-	// Modern Language Runtimes: Node / JavaScript
-	"NODE_PATH":           true,
-	"NODE_ENV":            true,
-	"NPM_CONFIG_REGISTRY": true,
+	// Modern Language Runtimes: Node / JavaScript (AIR-08: NODE_PATH, NPM_CONFIG_REGISTRY excluded)
+	"NODE_ENV": true,
 
-	// Modern Language Runtimes: Python
-	"PYTHONPATH":              true,
+	// Modern Language Runtimes: Python (AIR-08: PYTHONPATH, PIP_INDEX_URL excluded)
 	"PYTHONUNBUFFERED":        true,
 	"PYTHONDONTWRITEBYTECODE": true,
-	"PIP_INDEX_URL":           true,
 	"UV_CACHE_DIR":            true,
 
 	// Windows NT System Environment Variables
@@ -113,23 +105,54 @@ func NewSanitizer(cfg Config) *DefaultSanitizer {
 	return &DefaultSanitizer{config: cfg}
 }
 
+// BuildCleanEnvironment constructs a sanitized, deduplicated environment slice for sandboxed execution.
+func BuildCleanEnvironment(cfg Config, hostEnv []string) []string {
+	return NewSanitizer(cfg).Sanitize(hostEnv)
+}
+
 // Sanitize filters host environment variables, purges unsafe relative entries from PATH,
-// injects virtual paths, and exports the nesting sentinel __AIRLOCK_ACTIVE=1.
+// injects virtual paths, deduplicates keys, and exports the nesting sentinel __AIRLOCK_ACTIVE=1.
 func (s *DefaultSanitizer) Sanitize(hostEnv []string) []string {
 	denySet := make(map[string]bool, len(s.config.DenyEnv))
 	for _, d := range s.config.DenyEnv {
-		denySet[strings.TrimSpace(d)] = true
+		trimmed := strings.TrimSpace(d)
+		if trimmed != "" {
+			denySet[trimmed] = true
+			if runtime.GOOS == "windows" {
+				denySet[strings.ToUpper(trimmed)] = true
+			}
+		}
 	}
 
 	keepSet := make(map[string]bool, len(s.config.KeepEnv))
 	for _, k := range s.config.KeepEnv {
 		trimmed := strings.TrimSpace(k)
-		if !denySet[trimmed] {
+		if trimmed != "" && !denySet[trimmed] && !(runtime.GOOS == "windows" && denySet[strings.ToUpper(trimmed)]) {
 			keepSet[trimmed] = true
 		}
 	}
 
-	result := make([]string, 0, len(hostEnv)+8)
+	type kvPair struct {
+		key string
+		val string
+	}
+	order := make([]string, 0, len(hostEnv)+24)
+	entries := make(map[string]kvPair, len(hostEnv)+24)
+
+	canonicalKey := func(k string) string {
+		if runtime.GOOS == "windows" {
+			return strings.ToUpper(k)
+		}
+		return k
+	}
+
+	setEnv := func(key, val string) {
+		ck := canonicalKey(key)
+		if _, exists := entries[ck]; !exists {
+			order = append(order, ck)
+		}
+		entries[ck] = kvPair{key: key, val: val}
+	}
 
 	for _, entry := range hostEnv {
 		idx := strings.Index(entry, "=")
@@ -140,14 +163,27 @@ func (s *DefaultSanitizer) Sanitize(hostEnv []string) []string {
 		val := entry[idx+1:]
 		keyUpper := strings.ToUpper(key)
 
+		// Never inherit untrusted nesting sentinel from caller environment (AIR-03)
+		if keyUpper == "__AIRLOCK_ACTIVE" {
+			continue
+		}
+
 		// Explicit deny list takes absolute priority
 		if denySet[key] || (runtime.GOOS == "windows" && denySet[keyUpper]) {
 			continue
 		}
 
+		// Block GIT_CONFIG_* injection unless explicitly requested via KeepEnv (AIR-08)
+		if strings.HasPrefix(keyUpper, "GIT_CONFIG_") && !keepSet[key] {
+			continue
+		}
+
 		// Explicit keep-env overrides take precedence
 		if keepSet[key] || (runtime.GOOS == "windows" && keepSet[keyUpper]) {
-			result = append(result, entry)
+			if keyUpper == "PATH" {
+				val = SanitizePath(val)
+			}
+			setEnv(key, val)
 			continue
 		}
 
@@ -166,85 +202,80 @@ func (s *DefaultSanitizer) Sanitize(hostEnv []string) []string {
 			continue
 		}
 
-		result = append(result, key+"="+val)
+		setEnv(key, val)
 	}
 
 	// Inject virtual paths
 	if s.config.VirtualHome != "" {
-		result = append(result, "HOME="+s.config.VirtualHome)
+		setEnv("HOME", s.config.VirtualHome)
 		if runtime.GOOS == "windows" {
-			result = append(result, "USERPROFILE="+s.config.VirtualHome)
+			setEnv("USERPROFILE", s.config.VirtualHome)
 		}
 	}
 	if s.config.ScratchDir != "" {
-		result = append(result, "TMPDIR="+s.config.ScratchDir)
+		setEnv("TMPDIR", s.config.ScratchDir)
 		if runtime.GOOS == "windows" {
-			result = append(result, "TEMP="+s.config.ScratchDir, "TMP="+s.config.ScratchDir)
+			setEnv("TEMP", s.config.ScratchDir)
+			setEnv("TMP", s.config.ScratchDir)
 		}
 	}
 
-	// Inject cache redirects to ephemeral staging layer (V-12)
+	// Inject cache redirects to ephemeral staging layer (V-12, AIR-08: overwrites inherited GOCACHE/GOMODCACHE)
 	if s.config.StagingCache != "" {
-		result = append(result,
-			"npm_config_cache="+filepath.Join(s.config.StagingCache, "npm"),
-			"YARN_CACHE_FOLDER="+filepath.Join(s.config.StagingCache, "yarn"),
-			"PIP_CACHE_DIR="+filepath.Join(s.config.StagingCache, "pip"),
-			"UV_CACHE_DIR="+filepath.Join(s.config.StagingCache, "uv"),
-			"CARGO_TARGET_DIR="+filepath.Join(s.config.StagingCache, "cargo-target"),
-			"GOCACHE="+filepath.Join(s.config.StagingCache, "go-build"),
-			"GOMODCACHE="+filepath.Join(s.config.StagingCache, "go-mod"),
-			"pnpm_config_store_dir="+filepath.Join(s.config.StagingCache, "pnpm-store"),
-			"pnpm_config_cache_dir="+filepath.Join(s.config.StagingCache, "pnpm-cache"),
-			"PNPM_HOME="+filepath.Join(s.config.StagingCache, "pnpm-home"),
-			"GRADLE_USER_HOME="+filepath.Join(s.config.StagingCache, "gradle"),
-			"MAVEN_OPTS=-Dmaven.repo.local="+filepath.Join(s.config.StagingCache, "m2", "repository"),
-			"NUGET_PACKAGES="+filepath.Join(s.config.StagingCache, "nuget", "packages"),
-			"DOTNET_CLI_HOME="+filepath.Join(s.config.StagingCache, "dotnet"),
-			"GEM_HOME="+filepath.Join(s.config.StagingCache, "gem"),
-			"BUNDLE_PATH="+filepath.Join(s.config.StagingCache, "bundle"),
-			"SWIFTPM_CACHE_DIR="+filepath.Join(s.config.StagingCache, "swiftpm"),
-			"CP_CACHE_DIR="+filepath.Join(s.config.StagingCache, "cocoapods"),
-			"HELM_CACHE_HOME="+filepath.Join(s.config.StagingCache, "helm"),
-		)
+		setEnv("npm_config_cache", filepath.Join(s.config.StagingCache, "npm"))
+		setEnv("YARN_CACHE_FOLDER", filepath.Join(s.config.StagingCache, "yarn"))
+		setEnv("PIP_CACHE_DIR", filepath.Join(s.config.StagingCache, "pip"))
+		setEnv("UV_CACHE_DIR", filepath.Join(s.config.StagingCache, "uv"))
+		setEnv("CARGO_TARGET_DIR", filepath.Join(s.config.StagingCache, "cargo-target"))
+		setEnv("GOCACHE", filepath.Join(s.config.StagingCache, "go-build"))
+		setEnv("GOMODCACHE", filepath.Join(s.config.StagingCache, "go-mod"))
+		setEnv("pnpm_config_store_dir", filepath.Join(s.config.StagingCache, "pnpm-store"))
+		setEnv("pnpm_config_cache_dir", filepath.Join(s.config.StagingCache, "pnpm-cache"))
+		setEnv("PNPM_HOME", filepath.Join(s.config.StagingCache, "pnpm-home"))
+		setEnv("GRADLE_USER_HOME", filepath.Join(s.config.StagingCache, "gradle"))
+		setEnv("MAVEN_OPTS", "-Dmaven.repo.local="+filepath.Join(s.config.StagingCache, "m2", "repository"))
+		setEnv("NUGET_PACKAGES", filepath.Join(s.config.StagingCache, "nuget", "packages"))
+		setEnv("DOTNET_CLI_HOME", filepath.Join(s.config.StagingCache, "dotnet"))
+		setEnv("GEM_HOME", filepath.Join(s.config.StagingCache, "gem"))
+		setEnv("BUNDLE_PATH", filepath.Join(s.config.StagingCache, "bundle"))
+		setEnv("SWIFTPM_CACHE_DIR", filepath.Join(s.config.StagingCache, "swiftpm"))
+		setEnv("CP_CACHE_DIR", filepath.Join(s.config.StagingCache, "cocoapods"))
+		setEnv("HELM_CACHE_HOME", filepath.Join(s.config.StagingCache, "helm"))
 	}
 
 	// Inject proxy configuration if active
 	if s.config.ProxyURL != "" {
-		result = append(result,
-			"HTTP_PROXY="+s.config.ProxyURL,
-			"HTTPS_PROXY="+s.config.ProxyURL,
-			"http_proxy="+s.config.ProxyURL,
-			"https_proxy="+s.config.ProxyURL,
-			"npm_config_proxy="+s.config.ProxyURL,
-			"PIP_PROXY="+s.config.ProxyURL,
-		)
+		setEnv("HTTP_PROXY", s.config.ProxyURL)
+		setEnv("HTTPS_PROXY", s.config.ProxyURL)
+		setEnv("http_proxy", s.config.ProxyURL)
+		setEnv("https_proxy", s.config.ProxyURL)
+		setEnv("npm_config_proxy", s.config.ProxyURL)
+		setEnv("PIP_PROXY", s.config.ProxyURL)
 	}
 
 	// Inject DNS interceptor address for tools that honour it
 	if s.config.DNSResolverAddress != "" {
-		result = append(result, "AIRLOCK_DNS="+s.config.DNSResolverAddress)
+		setEnv("AIRLOCK_DNS", s.config.DNSResolverAddress)
 	}
 
 	// Inject TLS root certificate fallbacks for sandboxed runtimes (e.g. macOS Seatbelt blocking securityd)
-	var hasSSLCert, hasGODEBUG bool
-	for _, r := range result {
-		if strings.HasPrefix(r, "SSL_CERT_FILE=") {
-			hasSSLCert = true
-		} else if strings.HasPrefix(r, "GODEBUG=") {
-			hasGODEBUG = true
-		}
-	}
-	if !hasSSLCert {
+	if _, hasSSLCert := entries[canonicalKey("SSL_CERT_FILE")]; !hasSSLCert && !denySet["SSL_CERT_FILE"] {
 		if _, err := os.Stat("/etc/ssl/cert.pem"); err == nil {
-			result = append(result, "SSL_CERT_FILE=/etc/ssl/cert.pem")
+			setEnv("SSL_CERT_FILE", "/etc/ssl/cert.pem")
 		}
 	}
-	if !hasGODEBUG {
-		result = append(result, "GODEBUG=x509usefallbackroots=1")
+	if _, hasGODEBUG := entries[canonicalKey("GODEBUG")]; !hasGODEBUG && !denySet["GODEBUG"] {
+		setEnv("GODEBUG", "x509usefallbackroots=1")
 	}
 
 	// Export nesting sentinel to prevent recursive sandboxing crashes in agent loops
-	result = append(result, "__AIRLOCK_ACTIVE=1")
+	setEnv("__AIRLOCK_ACTIVE", "1")
+
+	result := make([]string, 0, len(order))
+	for _, ck := range order {
+		pair := entries[ck]
+		result = append(result, pair.key+"="+pair.val)
+	}
 
 	return result
 }

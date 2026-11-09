@@ -203,16 +203,20 @@ func (h *DefaultToolHandler) HandleExec(ctx context.Context, rawArgs json.RawMes
 		}
 	}
 
-	// 3. Load Declarative Config
-	var loadedCfg *config.Config
+	// 3. Load Declarative Config on top of hardened 'agent' profile baseline (AIR-02 / AIR-05)
+	loadedCfg, _ := config.GetBuiltinProfile(config.ProfileAgent)
 	discoveredConfigPath := args.ConfigPath
 	if discoveredConfigPath != "" {
 		cfg, err := config.LoadFromFile(discoveredConfigPath)
 		if err == nil {
-			loadedCfg = cfg
+			if config.IsUntrustedWorkspaceConfigPath(discoveredConfigPath, workspaceRoot) {
+				loadedCfg, _ = config.AttenuateWorkspaceConfig(loadedCfg, cfg, workspaceRoot)
+			} else {
+				loadedCfg = config.MergeProfiles(loadedCfg, cfg)
+			}
 		}
 	} else {
-		p, cfg, err := config.DiscoverConfig(workspaceRoot)
+		p, cfg, _, err := config.DiscoverAndMergeConfig(loadedCfg, workspaceRoot)
 		if err == nil && cfg != nil {
 			loadedCfg = cfg
 			discoveredConfigPath = p
@@ -220,6 +224,7 @@ func (h *DefaultToolHandler) HandleExec(ctx context.Context, rawArgs json.RawMes
 	}
 
 	airgap := args.Airgap
+	antiLoopback := true
 	extraDomains := append([]string(nil), args.AllowDomains...)
 	keptEnvVars := append([]string(nil), args.KeepEnv...)
 	var deniedEnvVars []string
@@ -228,14 +233,21 @@ func (h *DefaultToolHandler) HandleExec(ctx context.Context, rawArgs json.RawMes
 	var extraDenyRead []string
 	var extraDenyWrite []string
 	var ignoredVetRules []string
-	vetEnabled := false
-	vetStrict := false
+	var allowedUnixSockets []string
+	var allowedLoopbackPorts []int
+	vetEnabled := true
+	vetStrict := true
 
 	if loadedCfg != nil {
 		config.SanitizeAndEnforceGuardrails(loadedCfg)
 		if loadedCfg.Network.Airgap && !args.AllowNetwork {
 			airgap = true
 		}
+		if loadedCfg.Network.AntiLoopback {
+			antiLoopback = true
+		}
+		allowedUnixSockets = append(allowedUnixSockets, loadedCfg.Network.AllowedUnixSockets...)
+		allowedLoopbackPorts = append(allowedLoopbackPorts, loadedCfg.Network.AllowedLoopbackPorts...)
 		extraDomains = append(extraDomains, loadedCfg.Network.AllowDomains...)
 		keptEnvVars = append(keptEnvVars, loadedCfg.Env.Allow...)
 		deniedEnvVars = append(deniedEnvVars, loadedCfg.Env.Deny...)
@@ -265,24 +277,28 @@ func (h *DefaultToolHandler) HandleExec(ctx context.Context, rawArgs json.RawMes
 	}
 
 	opts := sandbox.Options{
-		WorkspaceRoot:   workspaceRoot,
-		ConfigPath:      discoveredConfigPath,
-		Airgap:          airgap,
-		AllowDirectNet:  args.AllowNetwork,
-		AllowedDomains:  extraDomains,
-		KeepEnv:         keptEnvVars,
-		DenyEnv:         deniedEnvVars,
-		ExtraAllowRead:  extraAllowRead,
-		ExtraAllowWrite: extraAllowWrite,
-		ExtraDenyRead:   extraDenyRead,
-		ExtraDenyWrite:  extraDenyWrite,
-		NonInteractive:  true,
-		AuditLogger:     effectiveLogger,
-		VetEnabled:      vetEnabled,
-		VetStrict:       vetStrict,
-		IgnoredVetRules: ignoredVetRules,
-		Stdout:          &stdoutBuf,
-		Stderr:          &stderrBuf,
+		WorkspaceRoot:        workspaceRoot,
+		Profile:              config.ProfileAgent,
+		ConfigPath:           discoveredConfigPath,
+		Airgap:               airgap,
+		AllowDirectNet:       args.AllowNetwork,
+		AntiLoopback:         antiLoopback,
+		AllowedUnixSockets:   allowedUnixSockets,
+		AllowedLoopbackPorts: allowedLoopbackPorts,
+		AllowedDomains:       extraDomains,
+		KeepEnv:              keptEnvVars,
+		DenyEnv:              deniedEnvVars,
+		ExtraAllowRead:       extraAllowRead,
+		ExtraAllowWrite:      extraAllowWrite,
+		ExtraDenyRead:        extraDenyRead,
+		ExtraDenyWrite:       extraDenyWrite,
+		NonInteractive:       true,
+		AuditLogger:          effectiveLogger,
+		VetEnabled:           vetEnabled,
+		VetStrict:            vetStrict,
+		IgnoredVetRules:      ignoredVetRules,
+		Stdout:               &stdoutBuf,
+		Stderr:               &stderrBuf,
 	}
 
 	eng, err := sandbox.NewEngine(opts)

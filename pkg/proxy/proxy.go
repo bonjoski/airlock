@@ -5,10 +5,11 @@ package proxy
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
-	"net/url"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,28 +45,34 @@ type Proxy interface {
 
 // Options specifies configuration options for the egress forward proxy.
 type Options struct {
-	AllowedDomains []string
-	Logger         audit.Logger
-	PromptHandler  PromptHandler
-	ConfigPath     string
+	AllowedDomains          []string
+	AllowedConnectPorts     []int
+	AllowPrivateIPsForTests bool
+	Logger                  audit.Logger
+	PromptHandler           PromptHandler
+	ConfigPath              string
 }
 
 // EgressProxy implements an ephemeral localhost forward proxy with domain whitelisting and DNS interception.
 type EgressProxy struct {
-	listener       net.Listener
-	port           int
-	dnsServer      *DNSServer
-	allowedDomains map[string]bool
-	domainRules    []string
-	domainMu       sync.RWMutex
-	promptHandler  PromptHandler
-	configPath     string
-	logger         audit.Logger
-	ctx            context.Context
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
-	mu             sync.Mutex
-	closed         bool
+	listener            net.Listener
+	port                int
+	dnsServer           *DNSServer
+	allowedDomains      map[string]bool
+	domainRules         []string
+	allowedConnectPorts map[int]bool
+	allowPrivateForTest bool
+	dialer              *net.Dialer
+	httpTransport       *http.Transport
+	domainMu            sync.RWMutex
+	promptHandler       PromptHandler
+	configPath          string
+	logger              audit.Logger
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	wg                  sync.WaitGroup
+	mu                  sync.Mutex
+	closed              bool
 }
 
 // New creates and starts an ephemeral forward proxy on an unprivileged localhost port.
@@ -114,30 +121,55 @@ func NewWithOptions(opts Options) (*EgressProxy, error) {
 	}
 
 	dnsServer, err := NewDNSServerWithOptions(DNSOptions{
-		AllowedDomains: allowed,
-		DomainRules:    rules,
-		Logger:         opts.Logger,
-		PromptHandler:  opts.PromptHandler,
-		ConfigPath:     opts.ConfigPath,
+		AllowedDomains:          allowed,
+		DomainRules:             rules,
+		AllowPrivateIPsForTests: opts.AllowPrivateIPsForTests,
+		Logger:                  opts.Logger,
+		PromptHandler:           opts.PromptHandler,
+		ConfigPath:              opts.ConfigPath,
 	})
 	if err != nil {
 		_ = listener.Close()
 		return nil, fmt.Errorf("proxy: failed to start dns forwarder: %w", err)
 	}
 
+	connectPorts := make(map[int]bool)
+	if len(opts.AllowedConnectPorts) == 0 {
+		connectPorts[443] = true
+	} else {
+		for _, cp := range opts.AllowedConnectPorts {
+			if cp > 0 && cp <= 65535 {
+				connectPorts[cp] = true
+			}
+		}
+	}
+
+	safeDialer := newSafeDialer(10*time.Second, opts.AllowPrivateIPsForTests)
+	transport := &http.Transport{
+		DialContext:           safeDialer.DialContext,
+		ResponseHeaderTimeout: 30 * time.Second,
+		IdleConnTimeout:       30 * time.Second,
+		MaxIdleConns:          32,
+		DisableCompression:    true,
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	p := &EgressProxy{
-		listener:       listener,
-		port:           tcpAddr.Port,
-		dnsServer:      dnsServer,
-		allowedDomains: allowed,
-		domainRules:    rules,
-		promptHandler:  opts.PromptHandler,
-		configPath:     opts.ConfigPath,
-		logger:         opts.Logger,
-		ctx:            ctx,
-		cancel:         cancel,
+		listener:            listener,
+		port:                tcpAddr.Port,
+		dnsServer:           dnsServer,
+		allowedDomains:      allowed,
+		domainRules:         rules,
+		allowedConnectPorts: connectPorts,
+		allowPrivateForTest: opts.AllowPrivateIPsForTests,
+		dialer:              safeDialer,
+		httpTransport:       transport,
+		promptHandler:       opts.PromptHandler,
+		configPath:          opts.ConfigPath,
+		logger:              opts.Logger,
+		ctx:                 ctx,
+		cancel:              cancel,
 	}
 
 	p.wg.Add(1)
@@ -179,6 +211,9 @@ func (p *EgressProxy) Close() error {
 	if p.dnsServer != nil {
 		_ = p.dnsServer.Close()
 	}
+	if p.httpTransport != nil {
+		p.httpTransport.CloseIdleConnections()
+	}
 
 	p.wg.Wait()
 	return err
@@ -210,49 +245,73 @@ func (p *EgressProxy) serve() {
 	}
 }
 
+const (
+	maxProxyHeaderBytes = 64 * 1024
+	maxProxyBodyBytes   = 64 * 1024 * 1024
+)
+
 func (p *EgressProxy) handleConnection(client net.Conn) {
 	defer client.Close()
 
 	_ = client.SetDeadline(time.Now().Add(15 * time.Second))
-	reader := bufio.NewReader(client)
+	hdrGuard := newBoundedHeaderReader(client, maxProxyHeaderBytes)
+	reader := bufio.NewReader(hdrGuard)
+	clientAddr := client.RemoteAddr().String()
 
-	line, err := reader.ReadString('\n')
+	req, err := http.ReadRequest(reader)
 	if err != nil {
 		return
 	}
+	hdrGuard.disable()
 
-	parts := strings.Fields(line)
-	if len(parts) < 2 {
+	if req.Method == http.MethodConnect {
+		p.handleConnect(client, reader, req, clientAddr)
 		return
 	}
 
-	method := parts[0]
-	clientAddr := client.RemoteAddr().String()
-
-	if method == "CONNECT" {
-		p.handleConnect(client, reader, parts[1], clientAddr)
-		return
-	}
-
-	// Plain HTTP forwarding (GET, POST, HEAD, PUT, DELETE, OPTIONS)
-	p.handlePlainHTTP(client, reader, line, parts, clientAddr)
+	// Plain HTTP forwarding: parse and validate EVERY request on the connection (AIR-04)
+	p.handlePlainHTTP(client, reader, hdrGuard, req, clientAddr)
 }
 
-func (p *EgressProxy) handleConnect(client net.Conn, reader *bufio.Reader, target string, clientAddr string) {
-	host := target
-	port := 443
-	if colonIdx := strings.Index(target, ":"); colonIdx != -1 {
-		host = target[:colonIdx]
-		if pVal, err := strconv.Atoi(target[colonIdx+1:]); err == nil {
-			port = pVal
-		}
+func (p *EgressProxy) handleConnect(client net.Conn, reader *bufio.Reader, req *http.Request, clientAddr string) {
+	rawTarget := req.Host
+	if rawTarget == "" && req.URL != nil {
+		rawTarget = req.URL.Host
 	}
 
-	// Drain headers until empty line
-	for {
-		headerLine, err := reader.ReadString('\n')
-		if err != nil || headerLine == "\r\n" || headerLine == "\n" {
-			break
+	host, port, err := splitHostPortDefault(rawTarget, 443)
+	if err != nil || host == "" {
+		_, _ = client.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
+		return
+	}
+
+	// Enforce allowed CONNECT ports (443 by default) (AIR-04)
+	if !p.allowedConnectPorts[port] {
+		_ = p.logger.LogNetwork(audit.NetworkRecord{
+			Protocol:   "https_connect",
+			Host:       host,
+			Port:       port,
+			Action:     "DENY",
+			Reason:     "connect_port_not_allowed",
+			ClientAddr: clientAddr,
+		})
+		_, _ = client.Write([]byte("HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nBlocked by Airlock Sandbox: CONNECT port not permitted.\r\n"))
+		return
+	}
+
+	// Reject literal private/loopback/IMDS IP targets immediately (AIR-04)
+	if ip := net.ParseIP(host); ip != nil && !p.allowPrivateForTest {
+		if blocked, reason := IsBlockedEgressIP(ip); blocked {
+			_ = p.logger.LogNetwork(audit.NetworkRecord{
+				Protocol:   "https_connect",
+				Host:       host,
+				Port:       port,
+				Action:     "DENY",
+				Reason:     "blocked_ip_" + reason,
+				ClientAddr: clientAddr,
+			})
+			_, _ = client.Write([]byte("HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nBlocked by Airlock Sandbox: Restricted target IP.\r\n"))
+			return
 		}
 	}
 
@@ -270,6 +329,60 @@ func (p *EgressProxy) handleConnect(client net.Conn, reader *bufio.Reader, targe
 		return
 	}
 
+	targetAddr := net.JoinHostPort(host, strconv.Itoa(port))
+	dialCtx, cancel := context.WithTimeout(p.ctx, 10*time.Second)
+	remote, err := p.dialer.DialContext(dialCtx, "tcp", targetAddr)
+	cancel()
+	if err != nil {
+		if errors.Is(err, errBlockedEgressIP) {
+			_ = p.logger.LogNetwork(audit.NetworkRecord{
+				Protocol:   "https_connect",
+				Host:       host,
+				Port:       port,
+				Action:     "DENY",
+				Reason:     "dns_rebinding_or_restricted_ip",
+				ClientAddr: clientAddr,
+			})
+			_, _ = client.Write([]byte("HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nBlocked by Airlock Sandbox: Target resolved to restricted IP.\r\n"))
+			return
+		}
+		_, _ = client.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		return
+	}
+	defer remote.Close()
+
+	// 200 Connection Established
+	if _, err := client.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
+		return
+	}
+
+	// Peek TLS ClientHello SNI and verify it matches the authorized CONNECT host (AIR-04)
+	sni, helloBytes, err := peekTLSClientHelloSNI(client, reader)
+	if err != nil {
+		_ = p.logger.LogNetwork(audit.NetworkRecord{
+			Protocol:   "https_connect",
+			Host:       host,
+			Port:       port,
+			Action:     "DENY",
+			Reason:     "invalid_tls_clienthello",
+			ClientAddr: clientAddr,
+		})
+		return
+	}
+
+	isLiteralIP := net.ParseIP(host) != nil
+	if (!isLiteralIP && !strings.EqualFold(sni, host)) || (isLiteralIP && sni != "" && !strings.EqualFold(sni, host)) {
+		_ = p.logger.LogNetwork(audit.NetworkRecord{
+			Protocol:   "https_connect",
+			Host:       host,
+			Port:       port,
+			Action:     "DENY",
+			Reason:     "tls_sni_mismatch",
+			ClientAddr: clientAddr,
+		})
+		return
+	}
+
 	_ = p.logger.LogNetwork(audit.NetworkRecord{
 		Protocol:   "https_connect",
 		Host:       host,
@@ -279,43 +392,97 @@ func (p *EgressProxy) handleConnect(client net.Conn, reader *bufio.Reader, targe
 		ClientAddr: clientAddr,
 	})
 
-	targetAddr := target
-	if !strings.Contains(targetAddr, ":") {
-		targetAddr = targetAddr + ":443"
-	}
-
-	remote, err := net.DialTimeout("tcp", targetAddr, 10*time.Second)
-	if err != nil {
-		_, _ = client.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
-		return
-	}
-	defer remote.Close()
-
-	// 200 Connection Established
-	_, err = client.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
-	if err != nil {
-		return
-	}
-
-	// Reset deadlines for bi-directional TLS tunnel
+	// Reset deadlines and replay validated ClientHello to upstream
 	_ = client.SetDeadline(time.Time{})
 	_ = remote.SetDeadline(time.Time{})
+	if len(helloBytes) > 0 {
+		if _, err := remote.Write(helloBytes); err != nil {
+			return
+		}
+	}
 
 	p.pipe(client, remote, reader)
 }
 
-func (p *EgressProxy) handlePlainHTTP(client net.Conn, reader *bufio.Reader, firstLine string, parts []string, clientAddr string) {
-	reqURL, err := url.Parse(parts[1])
-	if err != nil || reqURL.Host == "" {
-		_, _ = client.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
-		return
+func (p *EgressProxy) handlePlainHTTP(client net.Conn, reader *bufio.Reader, hdrGuard *boundedHeaderReader, firstReq *http.Request, clientAddr string) {
+	req := firstReq
+	for {
+		if req.Body != nil {
+			req.Body = http.MaxBytesReader(nil, req.Body, maxProxyBodyBytes)
+		}
+
+		if !p.forwardSingleHTTPRequest(client, req, clientAddr) {
+			return
+		}
+		if req.Close {
+			return
+		}
+
+		// Parse the next Keep-Alive HTTP request independently so Host smuggling is impossible (AIR-04)
+		_ = client.SetDeadline(time.Now().Add(15 * time.Second))
+		hdrGuard.reset()
+		nextReq, err := http.ReadRequest(reader)
+		hdrGuard.disable()
+		if err != nil {
+			return
+		}
+		req = nextReq
+	}
+}
+
+func (p *EgressProxy) forwardSingleHTTPRequest(client net.Conn, req *http.Request, clientAddr string) bool {
+	if req.URL == nil {
+		_, _ = client.Write([]byte("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"))
+		return false
+	}
+	if req.URL.Scheme != "" && !strings.EqualFold(req.URL.Scheme, "http") {
+		_, _ = client.Write([]byte("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"))
+		return false
 	}
 
-	host := reqURL.Hostname()
-	port := 80
-	if reqURL.Port() != "" {
-		if pVal, err := strconv.Atoi(reqURL.Port()); err == nil {
-			port = pVal
+	rawURLHost := strings.TrimSpace(req.URL.Host)
+	rawHdrHost := strings.TrimSpace(req.Host)
+	if rawURLHost == "" && rawHdrHost == "" {
+		_, _ = client.Write([]byte("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"))
+		return false
+	}
+
+	var host string
+	var port int
+	if rawURLHost != "" {
+		h, pt, err := splitHostPortDefault(rawURLHost, 80)
+		if err != nil {
+			_, _ = client.Write([]byte("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"))
+			return false
+		}
+		host, port = h, pt
+	}
+	if rawHdrHost != "" {
+		hdrH, hdrPt, err := splitHostPortDefault(rawHdrHost, 80)
+		if err != nil {
+			_, _ = client.Write([]byte("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"))
+			return false
+		}
+		// Reject mismatched absolute-URI host vs Host header smuggling (AIR-04)
+		if host != "" && (!strings.EqualFold(host, hdrH) || port != hdrPt) {
+			_, _ = client.Write([]byte("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n"))
+			return false
+		}
+		host, port = hdrH, hdrPt
+	}
+
+	if ip := net.ParseIP(host); ip != nil && !p.allowPrivateForTest {
+		if blocked, reason := IsBlockedEgressIP(ip); blocked {
+			_ = p.logger.LogNetwork(audit.NetworkRecord{
+				Protocol:   "http_plain",
+				Host:       host,
+				Port:       port,
+				Action:     "DENY",
+				Reason:     "blocked_ip_" + reason,
+				ClientAddr: clientAddr,
+			})
+			_, _ = client.Write([]byte("HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nBlocked by Airlock Sandbox: Restricted target IP.\r\n"))
+			return false
 		}
 	}
 
@@ -328,9 +495,37 @@ func (p *EgressProxy) handlePlainHTTP(client net.Conn, reader *bufio.Reader, fir
 			Reason:     "domain_not_whitelisted",
 			ClientAddr: clientAddr,
 		})
-		_, _ = client.Write([]byte("HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nBlocked by Airlock Sandbox: Target domain not whitelisted.\r\n"))
-		return
+		_, _ = client.Write([]byte("HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nBlocked by Airlock Sandbox: Target domain not whitelisted.\r\n"))
+		return false
 	}
+
+	targetHostPort := net.JoinHostPort(host, strconv.Itoa(port))
+	outReq := req.Clone(p.ctx)
+	outReq.RequestURI = ""
+	outReq.URL.Scheme = "http"
+	outReq.URL.Host = targetHostPort
+	outReq.Host = targetHostPort
+	outReq.Header.Del("Proxy-Connection")
+	outReq.Header.Del("Proxy-Authorization")
+
+	resp, err := p.httpTransport.RoundTrip(outReq)
+	if err != nil {
+		if errors.Is(err, errBlockedEgressIP) {
+			_ = p.logger.LogNetwork(audit.NetworkRecord{
+				Protocol:   "http_plain",
+				Host:       host,
+				Port:       port,
+				Action:     "DENY",
+				Reason:     "dns_rebinding_or_restricted_ip",
+				ClientAddr: clientAddr,
+			})
+			_, _ = client.Write([]byte("HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nBlocked by Airlock Sandbox: Target resolved to restricted IP.\r\n"))
+			return false
+		}
+		_, _ = client.Write([]byte("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n"))
+		return false
+	}
+	defer resp.Body.Close()
 
 	_ = p.logger.LogNetwork(audit.NetworkRecord{
 		Protocol:   "http_plain",
@@ -341,47 +536,11 @@ func (p *EgressProxy) handlePlainHTTP(client net.Conn, reader *bufio.Reader, fir
 		ClientAddr: clientAddr,
 	})
 
-	targetAddr := reqURL.Host
-	if !strings.Contains(targetAddr, ":") {
-		targetAddr = targetAddr + ":80"
+	_ = client.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	if err := resp.Write(client); err != nil {
+		return false
 	}
-
-	remote, err := net.DialTimeout("tcp", targetAddr, 10*time.Second)
-	if err != nil {
-		_, _ = client.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
-		return
-	}
-	defer remote.Close()
-
-	// Forward the first line
-	pathAndQuery := reqURL.RequestURI()
-	if pathAndQuery == "" {
-		pathAndQuery = "/"
-	}
-	modifiedFirstLine := fmt.Sprintf("%s %s %s\r\n", parts[0], pathAndQuery, parts[2])
-	if _, err := remote.Write([]byte(modifiedFirstLine)); err != nil {
-		return
-	}
-
-	// Forward the remaining headers
-	for {
-		headerLine, err := reader.ReadString('\n')
-		if err != nil {
-			break
-		}
-		if _, err := remote.Write([]byte(headerLine)); err != nil {
-			return
-		}
-		if headerLine == "\r\n" || headerLine == "\n" {
-			break
-		}
-	}
-
-	// Reset deadlines for tunneling data
-	_ = client.SetDeadline(time.Time{})
-	_ = remote.SetDeadline(time.Time{})
-
-	p.pipe(client, remote, reader)
+	return !resp.Close
 }
 
 func (p *EgressProxy) pipe(client, remote net.Conn, reader *bufio.Reader) {

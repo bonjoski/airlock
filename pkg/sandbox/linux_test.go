@@ -174,18 +174,43 @@ func TestLinuxEngine_NestedBypass(t *testing.T) {
 		WorkspaceRoot: tempDir,
 	}
 
-	eng := &LinuxEngine{
+	// 1. Spoofed __AIRLOCK_ACTIVE=1 without kernel Seccomp MUST NOT bypass bwrap (AIR-03)
+	unverifiedEng := &LinuxEngine{
 		opts:      opts,
-		bwrapPath: "/nonexistent/bwrap", // would fail if executed
+		bwrapPath: "/nonexistent/bwrap",
+		seccomp:   seccomp.NewFilter(),
+	}
+	if _, err := unverifiedEng.Execute(context.Background(), []string{"/bin/sh", "-c", "exit 0"}); err == nil {
+		t.Fatalf("AIR-03 VIOLATION: Spoofed __AIRLOCK_ACTIVE=1 bypassed bwrap without kernel confinement!")
 	}
 
-	// Should execute directly via exec.Command without touching bwrapPath
+	// 2. Verified nested confinement skips inner bwrap while still sanitizing env & failing closed on --airgap
+	eng := &LinuxEngine{
+		opts:                  opts,
+		bwrapPath:             "/nonexistent/bwrap", // would fail if executed
+		nestedVerifiedForTest: true,
+	}
+
+	// Should execute directly via exec.Command without touching bwrapPath when kernel confinement is verified
 	code, err := eng.Execute(context.Background(), []string{"/bin/sh", "-c", "exit 0"})
 	if err != nil {
 		t.Fatalf("Nested execution failed: %v", err)
 	}
 	if code != 0 {
 		t.Errorf("Expected exit code 0, got %d", code)
+	}
+
+	// Requesting --airgap inside nested sandbox must fail closed
+	airgapEng := &LinuxEngine{
+		opts: Options{
+			WorkspaceRoot: tempDir,
+			Airgap:        true,
+		},
+		bwrapPath:             "/nonexistent/bwrap",
+		nestedVerifiedForTest: true,
+	}
+	if _, err := airgapEng.Execute(context.Background(), []string{"/bin/sh", "-c", "exit 0"}); err == nil {
+		t.Fatalf("AIR-03 VIOLATION: Nested --airgap did not fail closed!")
 	}
 }
 

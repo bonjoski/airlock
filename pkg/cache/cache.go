@@ -167,8 +167,9 @@ func (m *DefaultManager) ProvisionStaging(stagingBase string) (*StagingConfig, e
 }
 
 // SyncBack atomically and safely synchronizes newly downloaded cache entries from
-// the ephemeral staging directory back to the host cache directory on successful execution.
-// It verifies against directory traversal, rejects symlinks, and performs atomic rename operations.
+// the ephemeral staging directory into Airlock's isolated sandbox cache directory
+// (~/.airlock/cache/<subdir>). It NEVER writes untrusted sandbox artifacts back over
+// host caches (~/.cache/go-build, ~/.npm, etc.) to prevent host toolchain poisoning (AIR-08).
 func (m *DefaultManager) SyncBack(stagingBase string, userHome string) error {
 	if stagingBase == "" || userHome == "" {
 		return nil
@@ -179,11 +180,12 @@ func (m *DefaultManager) SyncBack(stagingBase string, userHome string) error {
 		return nil
 	}
 
+	isolatedCacheRoot := filepath.Join(userHome, ".airlock", "cache")
 	for _, mapping := range m.mappings {
 		stagingSubdir := filepath.Join(stagingBase, mapping.Subdir)
-		hostTargetDir := filepath.Join(userHome, mapping.HostRelPath)
+		isolatedTargetDir := filepath.Join(isolatedCacheRoot, mapping.Subdir)
 
-		if err := m.syncDirectory(stagingSubdir, hostTargetDir); err != nil {
+		if err := m.syncDirectory(stagingSubdir, isolatedTargetDir); err != nil {
 			return fmt.Errorf("cache: failed to sync %s cache: %w", mapping.Name, err)
 		}
 	}

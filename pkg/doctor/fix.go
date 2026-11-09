@@ -354,7 +354,10 @@ func autoFixStoragePermissions(opts Options) FixAction {
 					continue
 				}
 				if runtime.GOOS != "windows" {
-					_ = os.Chmod(cleanDir, 0700)
+					if chmodErr := os.Chmod(cleanDir, 0700); chmodErr != nil {
+						failures = append(failures, fmt.Sprintf("Failed to chmod %s: %v", cleanDir, chmodErr))
+						continue
+					}
 				}
 				repaired = append(repaired, fmt.Sprintf("Created %s (0700)", cleanDir))
 				continue
@@ -375,7 +378,10 @@ func autoFixStoragePermissions(opts Options) FixAction {
 				continue
 			}
 			if runtime.GOOS != "windows" {
-				_ = os.Chmod(cleanDir, 0700)
+				if chmodErr := os.Chmod(cleanDir, 0700); chmodErr != nil {
+					failures = append(failures, fmt.Sprintf("Failed to chmod recreated directory %s: %v", cleanDir, chmodErr))
+					continue
+				}
 			}
 			repaired = append(repaired, fmt.Sprintf("Replaced insecure symlink at %s with private directory (0700)", cleanDir))
 			continue

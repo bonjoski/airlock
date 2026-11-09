@@ -28,19 +28,20 @@ type DNSHeader struct {
 // DNSServer provides an in-process, localhost DNS forwarder that filters
 // hostname resolution requests against the verified domain whitelist (V-08).
 type DNSServer struct {
-	conn           *net.UDPConn
-	port           int
-	allowedDomains map[string]bool
-	domainRules    []string
-	domainMu       sync.RWMutex
-	logger         audit.Logger
-	promptHandler  PromptHandler
-	configPath     string
-	ctx            context.Context
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
-	mu             sync.Mutex
-	closed         bool
+	conn                *net.UDPConn
+	port                int
+	allowedDomains      map[string]bool
+	domainRules         []string
+	allowPrivateForTest bool
+	domainMu            sync.RWMutex
+	logger              audit.Logger
+	promptHandler       PromptHandler
+	configPath          string
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	wg                  sync.WaitGroup
+	mu                  sync.Mutex
+	closed              bool
 }
 
 // NewDNSServer creates and starts an ephemeral DNS listener on 127.0.0.1:0.
@@ -53,11 +54,12 @@ func NewDNSServer(allowedDomains map[string]bool, logger audit.Logger) (*DNSServ
 
 // DNSOptions specifies configuration for the DNS interception server.
 type DNSOptions struct {
-	AllowedDomains map[string]bool
-	DomainRules    []string
-	Logger         audit.Logger
-	PromptHandler  PromptHandler
-	ConfigPath     string
+	AllowedDomains          map[string]bool
+	DomainRules             []string
+	AllowPrivateIPsForTests bool
+	Logger                  audit.Logger
+	PromptHandler           PromptHandler
+	ConfigPath              string
 }
 
 // NewDNSServerWithOptions creates a DNS forwarder with advanced options.
@@ -92,15 +94,16 @@ func NewDNSServerWithOptions(opts DNSOptions) (*DNSServer, error) {
 	}
 
 	s := &DNSServer{
-		conn:           conn,
-		port:           localAddr.Port,
-		allowedDomains: opts.AllowedDomains,
-		domainRules:    rules,
-		logger:         opts.Logger,
-		promptHandler:  opts.PromptHandler,
-		configPath:     opts.ConfigPath,
-		ctx:            ctx,
-		cancel:         cancel,
+		conn:                conn,
+		port:                localAddr.Port,
+		allowedDomains:      opts.AllowedDomains,
+		domainRules:         rules,
+		allowPrivateForTest: opts.AllowPrivateIPsForTests,
+		logger:              opts.Logger,
+		promptHandler:       opts.PromptHandler,
+		configPath:          opts.ConfigPath,
+		ctx:                 ctx,
+		cancel:              cancel,
 	}
 
 	s.wg.Add(1)
@@ -222,12 +225,28 @@ func (s *DNSServer) handleQuery(query []byte, remoteAddr net.Addr) {
 	var resolvedStrs []string
 	var targetIPs []net.IP
 	for _, ip := range ips {
+		if !s.allowPrivateForTest {
+			if blocked, _ := IsBlockedEgressIP(ip); blocked {
+				continue
+			}
+		}
 		resolvedStrs = append(resolvedStrs, ip.String())
 		if qtype == 1 && ip.To4() != nil {
 			targetIPs = append(targetIPs, ip.To4())
 		} else if qtype == 28 && ip.To4() == nil && ip.To16() != nil {
 			targetIPs = append(targetIPs, ip.To16())
 		}
+	}
+
+	if len(resolvedStrs) == 0 {
+		_ = s.logger.LogDNS(audit.DNSRecord{
+			Domain:    domain,
+			QueryType: qtypeStr,
+			Action:    "DENY",
+			Reason:    "resolved_to_restricted_ip",
+		})
+		s.sendNXDomain(query, header.ID, qnameLen, remoteAddr)
+		return
 	}
 
 	_ = s.logger.LogDNS(audit.DNSRecord{

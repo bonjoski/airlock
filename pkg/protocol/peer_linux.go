@@ -44,5 +44,9 @@ func GetProcessExecutablePath(pid int) (string, error) {
 	if pid <= 0 {
 		return "", fmt.Errorf("peer: invalid pid %d", pid)
 	}
-	return os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	exePath, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	if err != nil {
+		return "", fmt.Errorf("peer: failed to read /proc/%d/exe: %w", pid, err)
+	}
+	return exePath, nil
 }

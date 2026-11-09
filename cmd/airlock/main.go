@@ -299,21 +299,21 @@ func handleRun(args []string) {
 			fmt.Fprintf(os.Stderr, "airlock: error loading config %q: %v\n", configPath, err)
 			os.Exit(1)
 		}
-		if loadedCfg != nil {
+		if config.IsUntrustedWorkspaceConfigPath(configPath, resolvedWorkspace) {
+			loadedCfg, _ = config.AttenuateWorkspaceConfig(loadedCfg, cfg, resolvedWorkspace)
+		} else if loadedCfg != nil {
 			loadedCfg = config.MergeProfiles(loadedCfg, cfg)
 		} else {
 			loadedCfg = cfg
 		}
 		discoveredConfigPath = configPath
 	} else {
-		p, cfg, err := config.DiscoverConfig(resolvedWorkspace)
+		p, cfg, _, err := config.DiscoverAndMergeConfig(loadedCfg, resolvedWorkspace)
 		if err == nil && cfg != nil {
-			if loadedCfg != nil {
-				loadedCfg = config.MergeProfiles(loadedCfg, cfg)
-			} else {
-				loadedCfg = cfg
+			loadedCfg = cfg
+			if p != "" {
+				discoveredConfigPath = p
 			}
-			discoveredConfigPath = p
 		}
 	}
 
@@ -325,6 +325,9 @@ func handleRun(args []string) {
 	var extraDenyRead []string
 	var extraDenyWrite []string
 	var ignoredVetRules []string
+	var antiLoopback bool
+	var allowedUnixSockets []string
+	var allowedLoopbackPorts []int
 	promptTimeout := 15
 
 	if loadedCfg != nil {
@@ -333,6 +336,11 @@ func handleRun(args []string) {
 		if loadedCfg.Network.Airgap && !allowDirectNet {
 			airgap = true
 		}
+		if loadedCfg.Network.AntiLoopback {
+			antiLoopback = true
+		}
+		allowedUnixSockets = append(allowedUnixSockets, loadedCfg.Network.AllowedUnixSockets...)
+		allowedLoopbackPorts = append(allowedLoopbackPorts, loadedCfg.Network.AllowedLoopbackPorts...)
 		extraDomains = append(extraDomains, loadedCfg.Network.AllowDomains...)
 		keptEnvVars = append(keptEnvVars, loadedCfg.Env.Allow...)
 		deniedEnvVars = append(deniedEnvVars, loadedCfg.Env.Deny...)
@@ -414,13 +422,16 @@ func handleRun(args []string) {
 	}
 
 	opts := sandbox.Options{
-		WorkspaceRoot:   resolvedWorkspace,
-		WorkingDir:      currentWorkingDir,
-		Profile:         profileName,
-		ConfigPath:      discoveredConfigPath,
-		Airgap:          airgap,
-		AllowDirectNet:  allowDirectNet,
-		AllowedDomains:  extraDomains,
+		WorkspaceRoot:        resolvedWorkspace,
+		WorkingDir:           currentWorkingDir,
+		Profile:              profileName,
+		ConfigPath:           discoveredConfigPath,
+		Airgap:               airgap,
+		AllowDirectNet:       allowDirectNet,
+		AntiLoopback:         antiLoopback,
+		AllowedUnixSockets:   allowedUnixSockets,
+		AllowedLoopbackPorts: allowedLoopbackPorts,
+		AllowedDomains:       extraDomains,
 		KeepEnv:         keptEnvVars,
 		DenyEnv:         deniedEnvVars,
 		ExtraAllowRead:  extraAllowRead,

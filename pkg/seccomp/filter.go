@@ -23,8 +23,12 @@ const (
 	BPF_ABS = 0x20
 
 	BPF_JEQ = 0x10
+	BPF_JGE = 0x30
 
 	BPF_K = 0x00
+
+	// x32 ABI syscall bit mask on x86_64 (<asm/unistd.h>)
+	X32_SYSCALL_BIT = 0x40000000
 
 	// Seccomp Return actions (<linux/seccomp.h>)
 	SECCOMP_RET_KILL_PROCESS = 0x80000000
@@ -195,7 +199,12 @@ func (f *BPFFilter) CompileInstructions(arch string) ([]SockFilter, error) {
 	// [4+len(Blocked)+5]: RET ERRNO (deny)
 
 	numBlocked := len(blocked)
-	idxIoctlCheck := 4 + numBlocked
+	baseBlockedIdx := 4
+	if cfg.AuditArch == AUDIT_ARCH_X86_64 {
+		// Reserve 2 instructions to reject x32 ABI syscalls (nr >= 0x40000000)
+		baseBlockedIdx = 6
+	}
+	idxIoctlCheck := baseBlockedIdx + numBlocked
 	idxAllowNonIoctl := idxIoctlCheck + 1
 	idxLoadIoctlCmd := idxAllowNonIoctl + 1
 	idxCheckTiocsti := idxLoadIoctlCmd + 1
@@ -217,9 +226,17 @@ func (f *BPFFilter) CompileInstructions(arch string) ([]SockFilter, error) {
 		Stmt(BPF_LD|BPF_W|BPF_ABS, SeccompDataNrOffset),
 	)
 
+	// 2b. Reject x32 ABI syscalls on x86_64 (AIR-06: nr >= 0x40000000)
+	if cfg.AuditArch == AUDIT_ARCH_X86_64 {
+		instructions = append(instructions,
+			Jump(BPF_JMP|BPF_JGE|BPF_K, X32_SYSCALL_BIT, 0, 1),
+			Stmt(BPF_RET|BPF_K, SECCOMP_RET_KILL_PROCESS),
+		)
+	}
+
 	// 3. Blocked syscalls check
 	for i, syscallNr := range blocked {
-		currIdx := 4 + i
+		currIdx := baseBlockedIdx + i
 		jt := uint8(idxDeny - currIdx - 1)
 		instructions = append(instructions,
 			Jump(BPF_JMP|BPF_JEQ|BPF_K, syscallNr, jt, 0),

@@ -34,11 +34,12 @@ var (
 // LinuxEngine executes commands inside a hardened Bubblewrap container
 // backed by unprivileged user namespaces and Seccomp-BPF syscall filters.
 type LinuxEngine struct {
-	opts      Options
-	cacheMgr  cache.Manager
-	seccomp   seccomp.Filter
-	detector  pty.Detector
-	bwrapPath string
+	opts                  Options
+	cacheMgr              cache.Manager
+	seccomp               seccomp.Filter
+	detector              pty.Detector
+	bwrapPath             string
+	nestedVerifiedForTest bool
 }
 
 // NewLinuxEngine creates a new Linux sandbox engine using Bubblewrap and user namespaces.
@@ -109,20 +110,38 @@ func (l *LinuxEngine) CheckUserNamespaces() error {
 	return nil
 }
 
-// FindWorkspaceSecrets discovers sensitive credential files in the workspace root
-// that must be masked from untrusted read operations (V-04).
+// FindWorkspaceSecrets discovers sensitive credential files across the workspace
+// and its subdirectories that must be masked from untrusted read/write operations (V-04 / AIR-05).
 func FindWorkspaceSecrets(workspaceRoot string) ([]string, error) {
-	entries, err := os.ReadDir(workspaceRoot)
-	if err != nil {
+	if _, err := os.Stat(workspaceRoot); err != nil {
 		return nil, fmt.Errorf("sandbox: failed to inspect workspace: %w", err)
 	}
 
-	var secrets []string
-	for _, entry := range entries {
-		name := entry.Name()
+	var found []string
+	err := filepath.WalkDir(workspaceRoot, func(current string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if current == workspaceRoot {
+				return walkErr
+			}
+			return nil
+		}
+		if current == workspaceRoot {
+			return nil
+		}
+		name := d.Name()
+		if d.IsDir() {
+			if name == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		// Only bind-mask regular files; symlinks are not followed
+		if !d.Type().IsRegular() {
+			return nil
+		}
 
 		isSecret := strings.HasPrefix(name, ".env") ||
-			(strings.HasSuffix(name, ".pem") && !strings.Contains(name, "cacert") && !strings.Contains(name, "ca-bundle")) ||
+			strings.HasSuffix(name, ".pem") ||
 			strings.HasSuffix(name, ".key") ||
 			strings.HasPrefix(name, "id_rsa") ||
 			strings.HasPrefix(name, "id_ed25519") ||
@@ -132,11 +151,15 @@ func FindWorkspaceSecrets(workspaceRoot string) ([]string, error) {
 			name == "service-account.json"
 
 		if isSecret {
-			secrets = append(secrets, filepath.Join(workspaceRoot, name))
+			found = append(found, current)
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("sandbox: failed to inspect workspace: %w", err)
 	}
 
-	return secrets, nil
+	return found, nil
 }
 
 // BuildBwrapArgs synthesizes the complete argument list for bubblewrap execution.
@@ -149,8 +172,9 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 		"--unshare-uts",
 	}
 
-	// Network Namespace Detachment (V-09: Isolates network in Airgap and Anti-Loopback modes)
-	if l.opts.Airgap || l.opts.AntiLoopback ||
+	// Network Namespace Detachment (V-09 / AIR-06: Isolates network for all non-permissive profiles when airgapped/proxied)
+	isPermissive := strings.EqualFold(l.opts.Profile, "permissive")
+	if l.opts.Airgap || l.opts.AntiLoopback || (!isPermissive && !l.opts.AllowDirectNet) ||
 		strings.EqualFold(l.opts.Profile, "anti-loopback") ||
 		strings.EqualFold(l.opts.Profile, "anti_loopback") ||
 		strings.EqualFold(l.opts.Profile, "agent") ||
@@ -283,26 +307,33 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 		args = append(args, "--seccomp", "3")
 	}
 
-	// dev-agent profile extra hardening: capability dropping and credential masking
+	// Host credential masking across all profiles (AIR-05)
+	if userHome != "" {
+		hostSecretPaths := []string{
+			filepath.Join(userHome, ".ssh"),
+			filepath.Join(userHome, ".aws"),
+			filepath.Join(userHome, ".gnupg"),
+			filepath.Join(userHome, ".kube"),
+			filepath.Join(userHome, ".docker"),
+			filepath.Join(userHome, ".fabrial"),
+			filepath.Join(userHome, ".npmrc"),
+			filepath.Join(userHome, ".pypirc"),
+			filepath.Join(userHome, ".netrc"),
+			filepath.Join(userHome, ".config", "gh"),
+			filepath.Join(userHome, ".config", "gcloud"),
+		}
+		for _, target := range hostSecretPaths {
+			args = append(args, "--ro-bind-try", unreadableMask, target)
+		}
+	}
+
+	// dev-agent profile extra hardening: capability dropping and /proc masking
 	if strings.EqualFold(l.opts.Profile, "dev-agent") || strings.EqualFold(l.opts.Profile, "dev_agent") {
 		args = append(args,
 			"--cap-drop", "ALL",
 			"--ro-bind-try", unreadableMask, "/proc/sys",
 			"--ro-bind-try", unreadableMask, "/proc/kcore",
 		)
-		if userHome != "" {
-			devAgentDenies := []string{
-				filepath.Join(userHome, ".ssh"),
-				filepath.Join(userHome, ".aws"),
-				filepath.Join(userHome, ".gnupg"),
-				filepath.Join(userHome, ".kube"),
-				filepath.Join(userHome, ".config", "gh"),
-				filepath.Join(userHome, ".config", "gcloud"),
-			}
-			for _, target := range devAgentDenies {
-				args = append(args, "--ro-bind-try", unreadableMask, target)
-			}
-		}
 	}
 
 	// Ensure child terminates when supervisor exits
@@ -317,28 +348,7 @@ func (l *LinuxEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 		return 1, errors.New("sandbox: no command specified for execution")
 	}
 
-	// 1. Recursive Sandbox Detection (V-14 / Phase 1)
-	if os.Getenv("__AIRLOCK_ACTIVE") == "1" {
-		cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
-		if l.opts.WorkingDir != "" {
-			cmd.Dir = l.opts.WorkingDir
-		} else {
-			cmd.Dir = l.opts.WorkspaceRoot
-		}
-		cmd.Stdin = l.resolveStdin()
-		cmd.Stdout = l.resolveStdout()
-		cmd.Stderr = l.resolveStderr()
-		if err := cmd.Run(); err != nil {
-			var exitErr *exec.ExitError
-			if errors.As(err, &exitErr) {
-				return exitErr.ExitCode(), nil
-			}
-			return 1, fmt.Errorf("sandbox: nested execution failed: %w", err)
-		}
-		return 0, nil
-	}
-
-	// 2. Pre-Execution Static Analysis (Argus / vetpkg)
+	// 1. Pre-Execution Static Analysis (Argus / vetpkg) — ALWAYS enforced, even when nested (AIR-03)
 	inspector := l.opts.Inspector
 	if inspector == nil && l.opts.VetEnabled {
 		inspector = vet.NewEngine(vet.Config{
@@ -358,6 +368,44 @@ func (l *LinuxEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 				return 1, fmt.Errorf("sandbox: execution blocked by Argus static analysis policy (risk: %s)", report.MaxRisk)
 			}
 		}
+	}
+
+	// 2. Kernel-Verified Recursive Sandbox Detection (V-14 / AIR-03)
+	// Never trust caller-supplied __AIRLOCK_ACTIVE=1 unless PR_GET_SECCOMP confirms active confinement.
+	if os.Getenv("__AIRLOCK_ACTIVE") == "1" {
+		if isKernelSandboxed() || l.nestedVerifiedForTest {
+			if l.opts.Airgap || strings.EqualFold(l.opts.Profile, "airgap") {
+				return 1, errors.New("sandbox: cannot enforce --airgap inside an already-active nested sandbox session")
+			}
+			nestedEnv := env.BuildCleanEnvironment(env.Config{
+				VirtualHome:        os.Getenv("HOME"),
+				ScratchDir:         os.Getenv("TMPDIR"),
+				ProxyURL:           os.Getenv("HTTP_PROXY"),
+				DNSResolverAddress: os.Getenv("AIRLOCK_DNS"),
+				KeepEnv:            l.opts.KeepEnv,
+				DenyEnv:            l.opts.DenyEnv,
+			}, os.Environ())
+
+			cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
+			if l.opts.WorkingDir != "" {
+				cmd.Dir = l.opts.WorkingDir
+			} else {
+				cmd.Dir = l.opts.WorkspaceRoot
+			}
+			cmd.Env = nestedEnv
+			cmd.Stdin = l.resolveStdin()
+			cmd.Stdout = l.resolveStdout()
+			cmd.Stderr = l.resolveStderr()
+			if err := cmd.Run(); err != nil {
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
+					return exitErr.ExitCode(), nil
+				}
+				return 1, fmt.Errorf("sandbox: nested execution failed: %w", err)
+			}
+			return 0, nil
+		}
+		fmt.Fprintf(l.resolveStderr(), "airlock: warning: ignoring unverified __AIRLOCK_ACTIVE=1 in unconfined process\n")
 	}
 
 	// 3. Orphan Scavenger (V-11)
@@ -435,7 +483,7 @@ func (l *LinuxEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 	}
 	fullArgs := append(bwrapArgs, cmdArgs...)
 
-	// 7. Sanitize Environment (V-07)
+	// 7. Sanitize Environment (V-07 / AIR-02: Wire DenyEnv matching macos.go)
 	envConfig := env.Config{
 		VirtualHome:        sc.HomeDir(),
 		ScratchDir:         sc.TmpDir(),
@@ -443,6 +491,7 @@ func (l *LinuxEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 		ProxyURL:           proxyURL,
 		DNSResolverAddress: dnsAddr,
 		KeepEnv:            l.opts.KeepEnv,
+		DenyEnv:            l.opts.DenyEnv,
 	}
 	sanitizer := env.NewSanitizer(envConfig)
 	sanitizedEnv := sanitizer.Sanitize(os.Environ())

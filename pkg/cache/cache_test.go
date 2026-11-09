@@ -106,14 +106,19 @@ func TestManager_SyncBack_Valid(t *testing.T) {
 		t.Fatalf("SyncBack failed: %v", err)
 	}
 
-	// Verify file was copied to host cache
-	expectedHostFile := filepath.Join(mockHome, ".npm", "_cacache", "content-v2", "ab", "cd", "123456789")
-	data, err := os.ReadFile(expectedHostFile)
+	// Verify file was copied ONLY to isolated ~/.airlock/cache/npm and NOT host ~/.npm (AIR-08)
+	expectedIsolatedFile := filepath.Join(mockHome, ".airlock", "cache", "npm", "_cacache", "content-v2", "ab", "cd", "123456789")
+	data, err := os.ReadFile(expectedIsolatedFile)
 	if err != nil {
-		t.Fatalf("Failed to read synced file on host: %v", err)
+		t.Fatalf("Failed to read synced file in isolated cache: %v", err)
 	}
 	if string(data) != string(samplePayload) {
 		t.Errorf("Synced file content mismatch. Got %s, expected %s", string(data), string(samplePayload))
+	}
+
+	hostNpmFile := filepath.Join(mockHome, ".npm", "_cacache", "content-v2", "ab", "cd", "123456789")
+	if _, err := os.Stat(hostNpmFile); err == nil {
+		t.Fatalf("SECURITY VIOLATION (AIR-08): SyncBack wrote untrusted artifact into host ~/.npm: %s", hostNpmFile)
 	}
 }
 

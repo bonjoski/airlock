@@ -53,6 +53,12 @@ func (vm *bpfVM) run(data seccompDataSim) uint32 {
 			} else {
 				pc += int(inst.Jf)
 			}
+		case BPF_JMP | BPF_JGE | BPF_K:
+			if a >= inst.K {
+				pc += int(inst.Jt)
+			} else {
+				pc += int(inst.Jf)
+			}
 		case BPF_RET | BPF_K:
 			return inst.K
 		default:
@@ -165,6 +171,17 @@ func TestFilter_Simulation_Amd64(t *testing.T) {
 	expectedDeny := uint32(SECCOMP_RET_ERRNO | EPERM)
 	if ret := vm.run(maliciousIoctl); ret != expectedDeny {
 		t.Errorf("Expected TIOCSTI ioctl to be denied with 0x%x, got 0x%x", expectedDeny, ret)
+	}
+
+	// 6. x32 ABI syscalls (nr >= 0x40000000) -> KILL_PROCESS (AIR-06)
+	for _, x32Nr := range []uint32{X32_SYSCALL_BIT, X32_SYSCALL_BIT | 425, X32_SYSCALL_BIT | 520} {
+		x32Call := seccompDataSim{
+			arch: AUDIT_ARCH_X86_64,
+			nr:   int32(x32Nr),
+		}
+		if ret := vm.run(x32Call); ret != SECCOMP_RET_KILL_PROCESS {
+			t.Errorf("Expected x32 ABI syscall 0x%x to be killed with 0x%x, got 0x%x", x32Nr, SECCOMP_RET_KILL_PROCESS, ret)
+		}
 	}
 }
 

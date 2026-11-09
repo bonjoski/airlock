@@ -395,14 +395,17 @@ func TestSEC13_CacheStagingAndSync(t *testing.T) {
 		t.Fatalf("SyncBack failed: %v", err)
 	}
 
-	// Verify file was atomically synced to host cache
-	syncedFile := filepath.Join(mockHome, ".npm", "express-4.18.2.tgz")
+	// Verify file was atomically synced to isolated Airlock cache (AIR-08: never overwrite host ~/.npm)
+	syncedFile := filepath.Join(mockHome, ".airlock", "cache", "npm", "express-4.18.2.tgz")
 	data, err := os.ReadFile(syncedFile)
 	if err != nil {
-		t.Fatalf("SEC-13 FAILED: Synced file not found in host cache: %v", err)
+		t.Fatalf("SEC-13 FAILED: Synced file not found in isolated airlock cache: %v", err)
 	}
 	if string(data) != "TARBALL_BYTES" {
 		t.Errorf("SEC-13 FAILED: Cache content corrupted during sync")
+	}
+	if _, err := os.Stat(filepath.Join(mockHome, ".npm", "express-4.18.2.tgz")); err == nil {
+		t.Fatalf("SEC-13 / AIR-08 FAILED: Untrusted staging artifact polluted host ~/.npm")
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -48,29 +49,7 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 		return 1, errors.New("sandbox: no command specified for execution")
 	}
 
-	// 1. Recursive Sandbox Detection (V-14 / Phase 1)
-	// If already running inside an active Airlock boundary, avoid nested sandbox crashes.
-	if os.Getenv("__AIRLOCK_ACTIVE") == "1" {
-		cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
-		if m.opts.WorkingDir != "" {
-			cmd.Dir = m.opts.WorkingDir
-		} else {
-			cmd.Dir = m.opts.WorkspaceRoot
-		}
-		cmd.Stdin = m.resolveStdin()
-		cmd.Stdout = m.resolveStdout()
-		cmd.Stderr = m.resolveStderr()
-		if err := cmd.Run(); err != nil {
-			var exitErr *exec.ExitError
-			if errors.As(err, &exitErr) {
-				return exitErr.ExitCode(), nil
-			}
-			return 1, err
-		}
-		return 0, nil
-	}
-
-	// 2. Pre-Execution Static Analysis (Argus / vetpkg)
+	// 1. Pre-Execution Static Analysis (Argus / vetpkg) — ALWAYS enforced, even when nested (AIR-03)
 	inspector := m.opts.Inspector
 	if inspector == nil && m.opts.VetEnabled {
 		inspector = vet.NewEngine(vet.Config{
@@ -90,6 +69,44 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 				return 1, fmt.Errorf("sandbox: execution blocked by Argus static analysis policy (risk: %s)", report.MaxRisk)
 			}
 		}
+	}
+
+	// 2. Kernel-Verified Recursive Sandbox Detection (V-14 / AIR-03)
+	// Never trust caller-supplied __AIRLOCK_ACTIVE=1 unless active kernel Seatbelt confinement is verified.
+	if os.Getenv("__AIRLOCK_ACTIVE") == "1" {
+		if isKernelSandboxed() {
+			if m.opts.Airgap || strings.EqualFold(m.opts.Profile, "airgap") {
+				return 1, errors.New("sandbox: cannot enforce --airgap inside an already-active nested sandbox session")
+			}
+			nestedEnv := env.BuildCleanEnvironment(env.Config{
+				VirtualHome:        os.Getenv("HOME"),
+				ScratchDir:         os.Getenv("TMPDIR"),
+				ProxyURL:           os.Getenv("HTTP_PROXY"),
+				DNSResolverAddress: os.Getenv("AIRLOCK_DNS"),
+				KeepEnv:            m.opts.KeepEnv,
+				DenyEnv:            m.opts.DenyEnv,
+			}, os.Environ())
+
+			cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
+			if m.opts.WorkingDir != "" {
+				cmd.Dir = m.opts.WorkingDir
+			} else {
+				cmd.Dir = m.opts.WorkspaceRoot
+			}
+			cmd.Env = nestedEnv
+			cmd.Stdin = m.resolveStdin()
+			cmd.Stdout = m.resolveStdout()
+			cmd.Stderr = m.resolveStderr()
+			if err := cmd.Run(); err != nil {
+				var exitErr *exec.ExitError
+				if errors.As(err, &exitErr) {
+					return exitErr.ExitCode(), nil
+				}
+				return 1, err
+			}
+			return 0, nil
+		}
+		fmt.Fprintf(m.resolveStderr(), "airlock: warning: ignoring unverified __AIRLOCK_ACTIVE=1 in unconfined process\n")
 	}
 
 	// 3. Orphan Scavenger (V-11: Prevents disk space leaks from crashes or SIGKILL)
@@ -195,8 +212,11 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 		}
 	}
 
-	// 7. Assemble Command Execution via sandbox-exec
-	execArgs := append([]string{"-p", profileStr}, cmdArgs...)
+	// 7. Assemble Parameterized Command Execution via sandbox-exec (-D WORKSPACE_ROOT=... -D SCRATCH_DIR=...) (AIR-01)
+	execArgs, err := seatbelt.SandboxExecArgs(m.opts.WorkspaceRoot, sc.Root(), profileStr, cmdArgs)
+	if err != nil {
+		return 1, fmt.Errorf("sandbox: invalid sandbox-exec parameters: %w", err)
+	}
 	cmd := exec.CommandContext(ctx, "sandbox-exec", execArgs...)
 	if m.opts.WorkingDir != "" {
 		cmd.Dir = m.opts.WorkingDir

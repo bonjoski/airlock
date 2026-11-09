@@ -132,26 +132,51 @@ func DiscoverConfig(workspaceRoot string) (string, *Config, error) {
 }
 
 // DiscoverConfigWithIssues searches for an airlock policy file starting at workspaceRoot.
-// It returns the path to the found file, the parsed Config, any validation issues detected, or an error.
+// Workspace-local policy files are treated as untrusted and monotonically attenuated (AIR-02),
+// whereas user-level configs (~/.config/airlock/config.yaml, ~/.airlock/config.yaml) are trusted.
 func DiscoverConfigWithIssues(workspaceRoot string) (string, *Config, []ValidationIssue, error) {
-	if workspaceRoot != "" {
-		for _, name := range ConfigFileNames {
-			p := filepath.Join(workspaceRoot, name)
-			if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-				cfg, issues, err := LoadFromFileWithIssues(p)
-				return p, cfg, issues, err
+	// Resolve user global baseline config first if present
+	var globalPath string
+	var globalCfg *Config
+	var globalIssues []ValidationIssue
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		candidates := []string{
+			filepath.Join(home, ".config", "airlock", "config.yaml"),
+			filepath.Join(home, ".airlock", "config.yaml"),
+		}
+		for _, gp := range candidates {
+			if fi, err := os.Stat(gp); err == nil && !fi.IsDir() {
+				cfg, iss, loadErr := LoadFromFileWithIssues(gp)
+				if loadErr != nil {
+					return gp, nil, nil, loadErr
+				}
+				globalPath = gp
+				globalCfg = cfg
+				globalIssues = iss
+				break
 			}
 		}
 	}
 
-	// Check global config at ~/.airlock/config.yaml
-	home, err := os.UserHomeDir()
-	if err == nil {
-		globalPath := filepath.Join(home, ".airlock", "config.yaml")
-		if fi, err := os.Stat(globalPath); err == nil && !fi.IsDir() {
-			cfg, issues, err := LoadFromFileWithIssues(globalPath)
-			return globalPath, cfg, issues, err
+	if workspaceRoot != "" {
+		for _, name := range ConfigFileNames {
+			p := filepath.Join(workspaceRoot, name)
+			if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+				wsCfg, wsIssues, err := LoadFromFileWithIssues(p)
+				if err != nil {
+					return p, nil, nil, err
+				}
+				attenuated, attIssues := AttenuateWorkspaceConfig(globalCfg, wsCfg, workspaceRoot)
+				allIssues := append([]ValidationIssue(nil), globalIssues...)
+				allIssues = append(allIssues, wsIssues...)
+				allIssues = append(allIssues, attIssues...)
+				return p, attenuated, allIssues, nil
+			}
 		}
+	}
+
+	if globalCfg != nil {
+		return globalPath, globalCfg, globalIssues, nil
 	}
 
 	return "", nil, nil, nil
@@ -198,6 +223,12 @@ var forbiddenPathPatterns = []string{
 	".aws",
 	".gnupg",
 	".kube",
+	".docker",
+	".fabrial",
+	".npmrc",
+	".pypirc",
+	".netrc",
+	".config/gh",
 	".config/gcloud",
 	"docker.sock",
 	"/var/run/docker.sock",
@@ -263,7 +294,11 @@ func SanitizeAndEnforceGuardrails(cfg *Config) []ValidationIssue {
 // IsForbiddenEnv checks if an environment variable is restricted by core security guardrails.
 func IsForbiddenEnv(e string) bool {
 	upper := strings.ToUpper(strings.TrimSpace(e))
-	return upper == "LD_PRELOAD" || upper == "DYLD_INSERT_LIBRARIES" || upper == "DYLD_FORCE_FLAT_NAMESPACE"
+	return upper == "LD_PRELOAD" ||
+		upper == "DYLD_INSERT_LIBRARIES" ||
+		upper == "DYLD_FORCE_FLAT_NAMESPACE" ||
+		upper == "DYLD_LIBRARY_PATH" ||
+		upper == "__AIRLOCK_ACTIVE"
 }
 
 // IsForbiddenPath checks if a path targets sensitive secrets or restricted system files.
@@ -293,6 +328,7 @@ func isForbiddenPath(p string) bool {
 // MatchDomain evaluates whether a requested hostname matches an allowed domain rule.
 // It supports exact matches ("registry.npmjs.org"), subdomains ("sub.example.com" for "example.com"),
 // and wildcard patterns ("*.github.com", "*.internal.corp").
+// Bare TLD wildcards (e.g. "com", ".com", "*.com", "*") are strictly rejected (AIR-02).
 func MatchDomain(rule, host string) bool {
 	rule = strings.ToLower(strings.TrimSpace(rule))
 	host = strings.ToLower(strings.TrimSpace(host))
@@ -301,14 +337,29 @@ func MatchDomain(rule, host string) bool {
 		return false
 	}
 
-	// Strip trailing port if present in host
+	// Strip trailing port if present in host or rule
 	if idx := strings.Index(host, ":"); idx != -1 {
 		host = host[:idx]
+	}
+	if idx := strings.Index(rule, ":"); idx != -1 {
+		rule = rule[:idx]
+	}
+
+	rule = strings.TrimSuffix(rule, ".")
+	host = strings.TrimSuffix(host, ".")
+
+	// Enforce multi-label rule structure for all non-localhost rules (AIR-02)
+	if !IsValidDomainRule(rule) {
+		return false
 	}
 
 	// Exact match
 	if rule == host {
 		return true
+	}
+
+	if rule == "localhost" {
+		return false
 	}
 
 	// Wildcard root match (e.g., rule is "*.example.com" and host is "example.com")

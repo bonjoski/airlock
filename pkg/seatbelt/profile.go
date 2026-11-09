@@ -54,6 +54,9 @@ const profileTemplate = `;; Airlock Hardened Confinement Policy
 (version 1)
 (deny default)
 
+(define workspace-root (if (param "WORKSPACE_ROOT") (param "WORKSPACE_ROOT") "{{.WorkspaceRoot}}"))
+(define scratch-dir (if (param "SCRATCH_DIR") (param "SCRATCH_DIR") "{{.ScratchDir}}"))
+
 ;; 1. Core Process Lifecycle & System Discovery
 (allow process-fork)
 (allow process-exec)
@@ -68,6 +71,9 @@ const profileTemplate = `;; Airlock Hardened Confinement Policy
   (literal "/dev/dtracehelper")
   (regex #"^/dev/tty.*")
   (regex #"^/dev/ptmx.*"))
+
+;; Block controlling terminal ioctl injection such as TIOCSTI (AIR-06 / V-05)
+(deny file-ioctl (literal "/dev/tty"))
 
 (allow file-lock)
 (allow ipc-posix-shm*)
@@ -88,70 +94,92 @@ const profileTemplate = `;; Airlock Hardened Confinement Policy
   (global-name "com.apple.trustd.agent")
   (global-name "com.apple.trustd"))
 
-;; 4. Filesystem Read Policy: Allow system reads, but strictly block host and workspace secrets
+;; 4. Filesystem Read Policy: Allow system reads; denials follow all allows below
 (allow file-read*)
 {{range .ExtraAllowRead}}
 (allow file-read* (subpath "{{.}}"))
 {{end}}
 
-;; Block host secrets (V-01: Explicit Evaluated Absolute Paths)
-(deny file-read* file-write*
-  (subpath "{{.UserHome}}/.ssh")
-  (subpath "{{.UserHome}}/.aws")
-  (subpath "{{.UserHome}}/.gnupg")
-  (subpath "{{.UserHome}}/.kube")
-  (subpath "{{.UserHome}}/.config/gcloud"))
-
-;; Fallback defense-in-depth regex for non-standard user profiles
-(deny file-read* file-write*
-  (regex #"^/(Users|home)/[^/]+/\.(ssh|aws|gnupg|kube|config/gcloud)"))
-
-;; Block Docker daemon socket (V-06: Localhost Pivoting)
-(deny file-read* file-write*
-  (literal "/var/run/docker.sock")
-  (literal "/private/var/run/docker.sock"))
-
-;; Mask project secret files in workspace (V-04)
-(deny file-read*
-  (subpath "{{.WorkspaceRoot}}/.env")
-  (regex #"^{{.WorkspaceRootEscaped}}/\.env(\..+)?$")
-  (regex #"^{{.WorkspaceRootEscaped}}/.*\.pem$")
-  (regex #"^{{.WorkspaceRootEscaped}}/.*\.key$")
-  (regex #"^{{.WorkspaceRootEscaped}}/(id_rsa|id_ed25519).*$")
-  (regex #"^{{.WorkspaceRootEscaped}}/secrets\.json$"))
-{{range .ExtraDenyRead}}
-(deny file-read* (subpath "{{.}}"))
-{{end}}
-
-;; Permit CA certificate bundles inside workspace/virtualenvs even if named .pem (F3)
-(allow file-read*
-  (regex #"^{{.WorkspaceRootEscaped}}/(.*/)?(certifi|_vendor/certifi)/cacert\.pem$")
-  (regex #"^{{.WorkspaceRootEscaped}}/(.*/)?cacert.*\.pem$")
-  (regex #"^{{.WorkspaceRootEscaped}}/(.*/)?ca-certificates?/.*\.pem$")
-  (regex #"^{{.WorkspaceRootEscaped}}/(.*/)?(ca-bundle|tls-ca-bundle)\.pem$"))
-
 ;; 5. Filesystem Write Policy: Strictly confined to Workspace, Scratch, and System Temp (V-03)
 (deny file-write*)
 
 (allow file-write*
-  (subpath "{{.WorkspaceRoot}}")
-  (subpath "{{.ScratchDir}}")
+  (subpath workspace-root)
+  (subpath scratch-dir)
   (subpath "/tmp")
   (subpath "/private/tmp"))
 {{range .ExtraAllowWrite}}
 (allow file-write* (subpath "{{.}}"))
 {{end}}
 
+;; 5b. High-Precedence Credential, Secret & Metadata Denials (AIR-01 / AIR-05)
+;; Placed strictly AFTER all file-read* and file-write* allows so denials always win.
+
+;; Block host secrets and package/orchestrator credentials (V-01 / AIR-05)
+(deny file-read* file-write* file-link
+  (subpath "{{.UserHome}}/.ssh")
+  (subpath "{{.UserHome}}/.aws")
+  (subpath "{{.UserHome}}/.gnupg")
+  (subpath "{{.UserHome}}/.kube")
+  (subpath "{{.UserHome}}/.docker")
+  (subpath "{{.UserHome}}/.fabrial")
+  (subpath "{{.UserHome}}/.config/gcloud")
+  (literal "{{.UserHome}}/.npmrc")
+  (subpath "{{.UserHome}}/.npmrc")
+  (literal "{{.UserHome}}/.pypirc")
+  (subpath "{{.UserHome}}/.pypirc")
+  (literal "{{.UserHome}}/.netrc")
+  (subpath "{{.UserHome}}/.netrc"))
+
+{{if .UserHomeData}}
+(deny file-read* file-write* file-link
+  (subpath "{{.UserHomeData}}/.ssh")
+  (subpath "{{.UserHomeData}}/.aws")
+  (subpath "{{.UserHomeData}}/.gnupg")
+  (subpath "{{.UserHomeData}}/.kube")
+  (subpath "{{.UserHomeData}}/.docker")
+  (subpath "{{.UserHomeData}}/.fabrial")
+  (subpath "{{.UserHomeData}}/.config/gcloud")
+  (literal "{{.UserHomeData}}/.npmrc")
+  (subpath "{{.UserHomeData}}/.npmrc")
+  (literal "{{.UserHomeData}}/.pypirc")
+  (subpath "{{.UserHomeData}}/.pypirc")
+  (literal "{{.UserHomeData}}/.netrc")
+  (subpath "{{.UserHomeData}}/.netrc"))
+{{end}}
+
+;; Fallback defense-in-depth regex for non-standard user profiles
+(deny file-read* file-write* file-link
+  (regex #"^(/System/Volumes/Data)?/(Users|home)/[^/]+/\.(ssh|aws|gnupg|kube|docker|fabrial|npmrc|pypirc|netrc|config/gcloud)"))
+
+;; Block Docker daemon socket (V-06: Localhost Pivoting)
+(deny file-read* file-write* file-link
+  (literal "/var/run/docker.sock")
+  (literal "/private/var/run/docker.sock"))
+
 ;; Block access to launchd listeners in /tmp (V-10: ssh-agent socket protection)
-;; Must appear after allow file-write* to strictly enforce denial in SBPL
-(deny file-read* file-write*
+(deny file-read* file-write* file-link
   (regex #"^(/private)?/tmp/com\.apple\.launchd\..*"))
 
-;; Prevent Workspace poisoning: protect .git directory from modification (V-03)
-(deny file-write*
+;; Mask project secret files across workspace and all subdirectories (V-04 / AIR-05: strict .pem/.key masking)
+(deny file-read* file-write* file-link
+  (subpath (string-append workspace-root "/.env"))
+  (subpath "{{.WorkspaceRoot}}/.env")
+  (regex (string-append "^" "{{.WorkspaceRootEscaped}}" #"/(.*/)?\.env(\..+)?$"))
+  (regex (string-append "^" "{{.WorkspaceRootEscaped}}" #"/.*\.pem$"))
+  (regex (string-append "^" "{{.WorkspaceRootEscaped}}" #"/.*\.key$"))
+  (regex (string-append "^" "{{.WorkspaceRootEscaped}}" #"/(.*/)?(id_rsa|id_ed25519|id_ecdsa|id_dsa).*$"))
+  (regex (string-append "^" "{{.WorkspaceRootEscaped}}" #"/(.*/)?(secrets|service-account)\.json$")))
+{{range .ExtraDenyRead}}
+(deny file-read* file-link (subpath "{{.}}"))
+{{end}}
+
+;; Prevent Workspace poisoning: protect .git directory from modification or hardlinking (V-03 / AIR-05)
+(deny file-write* file-link
+  (subpath (string-append workspace-root "/.git"))
   (subpath "{{.WorkspaceRoot}}/.git"))
 {{range .ExtraDenyWrite}}
-(deny file-write* (subpath "{{.}}"))
+(deny file-write* file-link (subpath "{{.}}"))
 {{end}}
 
 ;; 6. Network Egress Policy (V-02 & V-08)
@@ -199,6 +227,50 @@ const profileTemplate = `;; Airlock Hardened Confinement Policy
 {{end}}
 `
 
+// EscapeSBPLString validates and escapes a string literal before emitting it inside
+// a double-quoted Apple Seatbelt SBPL string. It rejects control characters (NUL, CR, LF)
+// to neutralize S-expression injection and escapes backslashes and double quotes (AIR-01).
+func EscapeSBPLString(s string) (string, error) {
+	if strings.ContainsAny(s, "\x00\r\n") {
+		return "", fmt.Errorf("seatbelt: illegal control character in path or literal")
+	}
+	escaped := strings.ReplaceAll(s, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+	return escaped, nil
+}
+
+// ValidateParamValue verifies a raw value passed via sandbox-exec -D KEY=VALUE (AIR-01).
+func ValidateParamValue(s string) (string, error) {
+	if strings.ContainsAny(s, "\x00\r\n") {
+		return "", fmt.Errorf("seatbelt: illegal control character in sandbox-exec parameter")
+	}
+	return s, nil
+}
+
+// SandboxExecArgs constructs parameterized sandbox-exec CLI arguments (-D WORKSPACE_ROOT=... -D SCRATCH_DIR=... -p <profile>).
+func SandboxExecArgs(workspaceRoot, scratchDir, profile string, cmdArgs []string) ([]string, error) {
+	if resolved, err := filepath.EvalSymlinks(workspaceRoot); err == nil && resolved != "" {
+		workspaceRoot = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(scratchDir); err == nil && resolved != "" {
+		scratchDir = resolved
+	}
+	if _, err := ValidateParamValue(workspaceRoot); err != nil {
+		return nil, err
+	}
+	if _, err := ValidateParamValue(scratchDir); err != nil {
+		return nil, err
+	}
+	args := make([]string, 0, 6+len(cmdArgs))
+	args = append(args,
+		"-D", "WORKSPACE_ROOT="+workspaceRoot,
+		"-D", "SCRATCH_DIR="+scratchDir,
+		"-p", profile,
+	)
+	args = append(args, cmdArgs...)
+	return args, nil
+}
+
 // Generate renders the hardened Seatbelt Scheme profile string.
 func (g *ProfileGenerator) Generate(p Params) (string, error) {
 	if p.UserHome == "" {
@@ -207,6 +279,13 @@ func (g *ProfileGenerator) Generate(p Params) (string, error) {
 			return "", fmt.Errorf("seatbelt: failed to get user home directory: %w", err)
 		}
 		p.UserHome = home
+	}
+
+	// Reject control characters on raw inputs before symlink evaluation
+	for _, rawInput := range []string{p.UserHome, p.WorkspaceRoot, p.ScratchDir} {
+		if _, err := ValidateParamValue(rawInput); err != nil {
+			return "", err
+		}
 	}
 
 	// Canonicalize paths to resolve symlinks
@@ -220,23 +299,62 @@ func (g *ProfileGenerator) Generate(p Params) (string, error) {
 		p.ScratchDir = resolved
 	}
 
-	expandPath := func(paths []string) []string {
-		var out []string
-		for _, raw := range paths {
-			cleaned := strings.TrimSpace(raw)
-			if strings.HasPrefix(cleaned, "~/") {
-				cleaned = filepath.Join(p.UserHome, cleaned[2:])
-			}
-			out = append(out, cleaned)
-		}
-		return out
+	rawUserHome := p.UserHome
+	rawWorkspaceRoot := p.WorkspaceRoot
+
+	// Determine physical data volume path on macOS (/System/Volumes/Data/Users/...)
+	rawUserHomeData := ""
+	if strings.HasPrefix(rawUserHome, "/Users/") {
+		rawUserHomeData = path.Join("/System/Volumes/Data", filepath.ToSlash(rawUserHome))
 	}
 
-	p.ExtraAllowRead = expandPath(p.ExtraAllowRead)
-	p.ExtraAllowWrite = expandPath(p.ExtraAllowWrite)
-	p.ExtraDenyRead = expandPath(p.ExtraDenyRead)
-	p.ExtraDenyWrite = expandPath(p.ExtraDenyWrite)
-	p.AllowedUnixSockets = expandPath(p.AllowedUnixSockets)
+	expandAndEscapePaths := func(paths []string) ([]string, error) {
+		var out []string
+		for _, raw := range paths {
+			if _, err := ValidateParamValue(raw); err != nil {
+				return nil, err
+			}
+			cleaned := strings.TrimSpace(raw)
+			if cleaned == "" {
+				continue
+			}
+			if strings.HasPrefix(cleaned, "~/") {
+				cleaned = filepath.Join(rawUserHome, cleaned[2:])
+			}
+			escaped, err := EscapeSBPLString(cleaned)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, escaped)
+		}
+		return out, nil
+	}
+
+	var err error
+	if p.ExtraAllowRead, err = expandAndEscapePaths(p.ExtraAllowRead); err != nil {
+		return "", err
+	}
+	if p.ExtraAllowWrite, err = expandAndEscapePaths(p.ExtraAllowWrite); err != nil {
+		return "", err
+	}
+	if p.ExtraDenyRead, err = expandAndEscapePaths(p.ExtraDenyRead); err != nil {
+		return "", err
+	}
+	if p.ExtraDenyWrite, err = expandAndEscapePaths(p.ExtraDenyWrite); err != nil {
+		return "", err
+	}
+	if p.AllowedUnixSockets, err = expandAndEscapePaths(p.AllowedUnixSockets); err != nil {
+		return "", err
+	}
+
+	if p.ProxyPort < 0 || p.ProxyPort > 65535 {
+		return "", fmt.Errorf("seatbelt: invalid proxy port %d", p.ProxyPort)
+	}
+	for _, port := range p.AllowedLoopbackPorts {
+		if port <= 0 || port > 65535 {
+			return "", fmt.Errorf("seatbelt: invalid allowed loopback port %d", port)
+		}
+	}
 
 	// Anti-loopback is default enabled for agent profiles and anti-loopback profile
 	if strings.EqualFold(p.Profile, "anti-loopback") ||
@@ -248,12 +366,23 @@ func (g *ProfileGenerator) Generate(p Params) (string, error) {
 		p.AntiLoopback = true
 	}
 
-	// Escape WorkspaceRoot for regex use
-	p.WorkspaceRootEscaped = regexp.QuoteMeta(p.WorkspaceRoot)
-
-	// Determine physical data volume path on macOS (/System/Volumes/Data/Users/...)
-	if strings.HasPrefix(p.UserHome, "/Users/") {
-		p.UserHomeData = path.Join("/System/Volumes/Data", filepath.ToSlash(p.UserHome))
+	// Escape all dynamic path literals & regex prefixes for SBPL (AIR-01)
+	if p.UserHome, err = EscapeSBPLString(rawUserHome); err != nil {
+		return "", err
+	}
+	if rawUserHomeData != "" {
+		if p.UserHomeData, err = EscapeSBPLString(rawUserHomeData); err != nil {
+			return "", err
+		}
+	}
+	if p.WorkspaceRoot, err = EscapeSBPLString(rawWorkspaceRoot); err != nil {
+		return "", err
+	}
+	if p.ScratchDir, err = EscapeSBPLString(p.ScratchDir); err != nil {
+		return "", err
+	}
+	if p.WorkspaceRootEscaped, err = EscapeSBPLString(regexp.QuoteMeta(rawWorkspaceRoot)); err != nil {
+		return "", err
 	}
 
 	selectedTemplate := profileTemplate

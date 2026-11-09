@@ -7,27 +7,29 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  id-token: write # Required for Sigstore Cosign OIDC keyless signing
+  contents: read
 
 jobs:
   release:
     name: Build & Publish Release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write # Required for Sigstore Cosign OIDC keyless signing
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: 'go.mod'
           cache: true
 
       - name: Install Sigstore Cosign
-        uses: sigstore/cosign-installer@v3.8.1
+        uses: sigstore/cosign-installer@d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a # v3.8.1
 
       - name: Install Linux Sandbox Dependencies
         run: |
@@ -46,8 +48,10 @@ jobs:
         run: make build-sandboxed
 
       - name: Build & Package Binaries
+        env:
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="$REF_NAME"
           if [ -z "$VERSION" ] || [ "$VERSION" = "main" ]; then
             VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo "dev")"
           fi
@@ -61,7 +65,7 @@ jobs:
             dist/checksums.txt
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           files: |
             dist/*.tar.gz
