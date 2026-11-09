@@ -17,13 +17,13 @@ import (
 // are correctly interpolated into the synthesized Seatbelt profile.
 func TestAntiLoopbackProfile_Generation(t *testing.T) {
 	p := Params{
-		UserHome:           "/Users/testuser",
-		WorkspaceRoot:      "/Users/testuser/projects/demo",
-		ScratchDir:         "/tmp/airlock-scratch",
-		AntiLoopback:       true,
-		ProxyPort:          18443,
+		UserHome:             "/Users/testuser",
+		WorkspaceRoot:        "/Users/testuser/projects/demo",
+		ScratchDir:           "/tmp/airlock-scratch",
+		AntiLoopback:         true,
+		ProxyPort:            18443,
 		AllowedLoopbackPorts: []int{8443},
-		AllowedUnixSockets: []string{"/tmp/crucible.sock", "~/.crucible/ipc.sock"},
+		AllowedUnixSockets:   []string{"/tmp/crucible.sock", "~/.crucible/ipc.sock"},
 	}
 
 	gen := NewGenerator()

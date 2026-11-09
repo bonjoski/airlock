@@ -18,38 +18,38 @@ import (
 
 // SandboxOpts holds runtime parameters and policies for sandboxed execution.
 type SandboxOpts struct {
-	WorkspaceRoot   string
-	WorkingDir      string // Preserved working directory for executed commands
-	Profile         string // Execution profile ("standard", "agent", "strict", "airgap", "default")
-	ConfigPath      string
+	WorkspaceRoot        string
+	WorkingDir           string // Preserved working directory for executed commands
+	Profile              string // Execution profile ("standard", "agent", "strict", "airgap", "default")
+	ConfigPath           string
 	Airgap               bool
 	AllowDirectNet       bool
 	AntiLoopback         bool
 	AllowedUnixSockets   []string
 	AllowedLoopbackPorts []int
 	AllowedDomains       []string
-	KeepEnv         []string
-	DenyEnv         []string
-	ExtraAllowRead  []string
-	ExtraAllowWrite []string
-	ExtraDenyRead   []string
-	ExtraDenyWrite  []string
-	NonInteractive  bool
-	ScratchBase     string
-	AuditLogger     audit.Logger        // Optional structured telemetry logger
-	VetEnabled      bool                // Enable Argus static analysis inspection
-	VetStrict       bool                // Fail closed on high/critical security findings
-	VetTool         string              // Path to external vetpkg/argus tool
-	IgnoredVetRules []string            // Argus rule IDs to ignore
-	Inspector       vet.Inspector       // Injected inspector interface
-	PromptHandler   proxy.PromptHandler // Dynamic capability prompter
-	LeasedSecrets   []string            // Secret keys to dynamically lease via Locksmith ETX
-	LocksmithSocket string              // Explicit Locksmith socket path (optional)
-	SessionTicket   string              // Optional session ticket for batch execution
-	Debug           bool                // Verbose diagnostic logging (ELF pre-pass, etc.)
-	Stdout          io.Writer
-	Stderr          io.Writer
-	Stdin           io.Reader
+	KeepEnv              []string
+	DenyEnv              []string
+	ExtraAllowRead       []string
+	ExtraAllowWrite      []string
+	ExtraDenyRead        []string
+	ExtraDenyWrite       []string
+	NonInteractive       bool
+	ScratchBase          string
+	AuditLogger          audit.Logger        // Optional structured telemetry logger
+	VetEnabled           bool                // Enable Argus static analysis inspection
+	VetStrict            bool                // Fail closed on high/critical security findings
+	VetTool              string              // Path to external vetpkg/argus tool
+	IgnoredVetRules      []string            // Argus rule IDs to ignore
+	Inspector            vet.Inspector       // Injected inspector interface
+	PromptHandler        proxy.PromptHandler // Dynamic capability prompter
+	LeasedSecrets        []string            // Secret keys to dynamically lease via Locksmith ETX
+	LocksmithSocket      string              // Explicit Locksmith socket path (optional)
+	SessionTicket        string              // Optional session ticket for batch execution
+	Debug                bool                // Verbose diagnostic logging (ELF pre-pass, etc.)
+	Stdout               io.Writer
+	Stderr               io.Writer
+	Stdin                io.Reader
 }
 
 // Options is an alias for SandboxOpts to maintain backwards compatibility.

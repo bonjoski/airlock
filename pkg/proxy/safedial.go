@@ -21,25 +21,25 @@ var (
 )
 
 var restrictedCIDRs = mustParsePrefixes([]string{
-	"0.0.0.0/8",          // RFC 1122 "this host on this network" / unspecified
-	"10.0.0.0/8",         // RFC 1918 private
-	"100.64.0.0/10",      // RFC 6598 Carrier-Grade NAT (CGNAT / Alibaba IMDS)
-	"127.0.0.0/8",        // Loopback
-	"169.254.0.0/16",     // Link-local / Cloud IMDS (AWS, GCP, Azure)
-	"172.16.0.0/12",      // RFC 1918 private
-	"192.0.0.0/24",       // IETF protocol assignments
-	"192.168.0.0/16",     // RFC 1918 private
-	"198.18.0.0/15",      // Benchmarking
-	"224.0.0.0/4",        // IPv4 Multicast
-	"240.0.0.0/4",        // Reserved / Broadcast
-	"::/128",             // IPv6 Unspecified
-	"::1/128",            // IPv6 Loopback
-	"64:ff9b::/96",       // RFC 6052 Well-Known NAT64
-	"64:ff9b:1::/48",     // RFC 8215 Local-Use NAT64
-	"2002::/16",          // 6to4
-	"fc00::/7",           // IPv6 Unique Local Address (ULA, includes fd00:ec2::254 AWS IMDS)
-	"fe80::/10",          // IPv6 Link-Local
-	"ff00::/8",           // IPv6 Multicast
+	"0.0.0.0/8",      // RFC 1122 "this host on this network" / unspecified
+	"10.0.0.0/8",     // RFC 1918 private
+	"100.64.0.0/10",  // RFC 6598 Carrier-Grade NAT (CGNAT / Alibaba IMDS)
+	"127.0.0.0/8",    // Loopback
+	"169.254.0.0/16", // Link-local / Cloud IMDS (AWS, GCP, Azure)
+	"172.16.0.0/12",  // RFC 1918 private
+	"192.0.0.0/24",   // IETF protocol assignments
+	"192.168.0.0/16", // RFC 1918 private
+	"198.18.0.0/15",  // Benchmarking
+	"224.0.0.0/4",    // IPv4 Multicast
+	"240.0.0.0/4",    // Reserved / Broadcast
+	"::/128",         // IPv6 Unspecified
+	"::1/128",        // IPv6 Loopback
+	"64:ff9b::/96",   // RFC 6052 Well-Known NAT64
+	"64:ff9b:1::/48", // RFC 8215 Local-Use NAT64
+	"2002::/16",      // 6to4
+	"fc00::/7",       // IPv6 Unique Local Address (ULA, includes fd00:ec2::254 AWS IMDS)
+	"fe80::/10",      // IPv6 Link-Local
+	"ff00::/8",       // IPv6 Multicast
 })
 
 func mustParsePrefixes(raw []string) []netip.Prefix {

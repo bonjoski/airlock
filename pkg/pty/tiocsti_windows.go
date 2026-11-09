@@ -9,3 +9,14 @@ import "os"
 func CheckTIOCSTI(f *os.File) error {
 	return nil
 }
+
+// TIOCSTIRequest returns the platform-appropriate TIOCSTI ioctl opcode.
+func TIOCSTIRequest(goos string) uintptr {
+	if goos == "linux" {
+		return 0x5412
+	}
+	if goos == "darwin" {
+		return 0x80017472
+	}
+	return 0
+}
