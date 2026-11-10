@@ -50,7 +50,7 @@ build: ## Build the optimized release binary in ./bin/airlock and bin/airlock-mc
 .PHONY: build-sandboxed
 build-sandboxed: build ## Build release artifacts inside Airlock's own zero-trust sandbox (dogfooding)
 	@echo "==> Verifying sandboxed build execution with airlock..."
-	./$(BIN_DIR)/$(BINARY_NAME) run -keep-env GOMODCACHE,GOCACHE -- go build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY_NAME)-sandboxed $(MAIN_PKG)
+	./$(BIN_DIR)/$(BINARY_NAME) run -net -- go build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY_NAME)-sandboxed $(MAIN_PKG)
 	@rm -f $(BIN_DIR)/$(BINARY_NAME)-sandboxed
 	@echo "==> Sandboxed dogfood build verified successfully"
 

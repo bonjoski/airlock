@@ -270,4 +270,29 @@ func TestLinuxEngine_BuildBwrapArgs_DevAgent(t *testing.T) {
 	if !strings.Contains(argsStr, filepath.Join(mockHome, ".aws")) {
 		t.Errorf("dev-agent bwrap args missing ~/.aws masking: %s", argsStr)
 	}
+	if !strings.Contains(argsStr, "--unshare-net") {
+		t.Errorf("dev-agent without AllowDirectNet must unshare network: %s", argsStr)
+	}
+
+	// Verify AllowDirectNet allows network namespace sharing
+	eng.opts.AllowDirectNet = true
+	directArgs, err := eng.BuildBwrapArgs(sc, seccompFile, mockHome)
+	if err != nil {
+		t.Fatalf("BuildBwrapArgs with AllowDirectNet failed: %v", err)
+	}
+	directArgsStr := strings.Join(directArgs, " ")
+	if strings.Contains(directArgsStr, "--unshare-net") {
+		t.Errorf("dev-agent with AllowDirectNet must not unshare network: %s", directArgsStr)
+	}
+
+	// Verify Airgap overrides AllowDirectNet
+	eng.opts.Airgap = true
+	airgapArgs, err := eng.BuildBwrapArgs(sc, seccompFile, mockHome)
+	if err != nil {
+		t.Fatalf("BuildBwrapArgs with Airgap failed: %v", err)
+	}
+	airgapArgsStr := strings.Join(airgapArgs, " ")
+	if !strings.Contains(airgapArgsStr, "--unshare-net") {
+		t.Errorf("Airgap must always unshare network even if AllowDirectNet is set: %s", airgapArgsStr)
+	}
 }

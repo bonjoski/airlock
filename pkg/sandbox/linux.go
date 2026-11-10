@@ -172,15 +172,16 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 		"--unshare-uts",
 	}
 
-	// Network Namespace Detachment (V-09 / AIR-06: Isolates network for all non-permissive profiles when airgapped/proxied)
+	// Network Namespace Detachment (V-09 / AIR-06: Isolates network when airgapped or when direct network is disabled)
 	isPermissive := strings.EqualFold(l.opts.Profile, "permissive")
-	if l.opts.Airgap || l.opts.AntiLoopback || (!isPermissive && !l.opts.AllowDirectNet) ||
-		strings.EqualFold(l.opts.Profile, "anti-loopback") ||
-		strings.EqualFold(l.opts.Profile, "anti_loopback") ||
-		strings.EqualFold(l.opts.Profile, "agent") ||
-		strings.EqualFold(l.opts.Profile, "dev-agent") ||
-		strings.EqualFold(l.opts.Profile, "dev_agent") ||
-		strings.EqualFold(l.opts.Profile, "strict-agent") {
+	if l.opts.Airgap || strings.EqualFold(l.opts.Profile, "airgap") ||
+		(!l.opts.AllowDirectNet && (l.opts.AntiLoopback || !isPermissive ||
+			strings.EqualFold(l.opts.Profile, "anti-loopback") ||
+			strings.EqualFold(l.opts.Profile, "anti_loopback") ||
+			strings.EqualFold(l.opts.Profile, "agent") ||
+			strings.EqualFold(l.opts.Profile, "dev-agent") ||
+			strings.EqualFold(l.opts.Profile, "dev_agent") ||
+			strings.EqualFold(l.opts.Profile, "strict-agent"))) {
 		args = append(args, "--unshare-net")
 	}
 
