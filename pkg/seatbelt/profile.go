@@ -319,7 +319,7 @@ func (g *ProfileGenerator) Generate(p Params) (string, error) {
 				continue
 			}
 			if strings.HasPrefix(cleaned, "~/") {
-				cleaned = filepath.Join(rawUserHome, cleaned[2:])
+				cleaned = path.Join(filepath.ToSlash(rawUserHome), cleaned[2:])
 			}
 			escaped, err := EscapeSBPLString(cleaned)
 			if err != nil {
