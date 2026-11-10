@@ -49,6 +49,8 @@ build: ## Build the optimized release binary in ./bin/airlock and bin/airlock-mc
 
 .PHONY: build-sandboxed
 build-sandboxed: build ## Build release artifacts inside Airlock's own zero-trust sandbox (dogfooding)
+	@echo "==> Pre-caching Go module dependencies..."
+	@go mod download
 	@echo "==> Verifying sandboxed build execution with airlock..."
 	./$(BIN_DIR)/$(BINARY_NAME) run -- go build -ldflags="$(LDFLAGS)" -o $(BIN_DIR)/$(BINARY_NAME)-sandboxed $(MAIN_PKG)
 	@rm -f $(BIN_DIR)/$(BINARY_NAME)-sandboxed

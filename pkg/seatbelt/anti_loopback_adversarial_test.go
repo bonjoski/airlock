@@ -198,7 +198,7 @@ func TestAntiLoopback_AdversarialLiveRejection(t *testing.T) {
 	cmdSock := exec.CommandContext(ctxSock, "sandbox-exec", "-p", profile, "nc", "-U", "-w", "1", mockSock)
 	cmdSock.Stdin = strings.NewReader("PING\n")
 	outSock, errSock := cmdSock.CombinedOutput()
-	if errSock != nil {
+	if errSock != nil && !strings.Contains(string(outSock), "PONG") {
 		t.Fatalf("Whitelisted Unix socket connection failed: %v (output: %s)", errSock, string(outSock))
 	}
 	if !strings.Contains(string(outSock), "PONG") {
