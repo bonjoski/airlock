@@ -522,7 +522,11 @@ func (l *LinuxEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 	cmd.ExtraFiles = []*os.File{seccompFile} // Passed as child FD 3
 
 	// 9. Non-Interactive Pipe Handling (V-14)
-	isInteractive := l.detector.IsTerminal(os.Stdin) && !l.opts.NonInteractive
+	detector := l.detector
+	if detector == nil {
+		detector = pty.NewDetector()
+	}
+	isInteractive := detector.IsTerminal(os.Stdin) && !l.opts.NonInteractive
 	if isInteractive {
 		cmd.Stdin = l.resolveStdin()
 	} else {

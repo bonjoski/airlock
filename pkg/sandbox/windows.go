@@ -226,7 +226,11 @@ func (w *WindowsEngine) Execute(ctx context.Context, cmdArgs []string) (int, err
 	cmd.Stderr = w.resolveStderr()
 
 	// 9. Non-Interactive Pipe Handling (V-14)
-	isInteractive := w.detector.IsTerminal(os.Stdin) && !w.opts.NonInteractive
+	detector := w.detector
+	if detector == nil {
+		detector = pty.NewDetector()
+	}
+	isInteractive := detector.IsTerminal(os.Stdin) && !w.opts.NonInteractive
 	if isInteractive {
 		cmd.Stdin = w.resolveStdin()
 	} else {

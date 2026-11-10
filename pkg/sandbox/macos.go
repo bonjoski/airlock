@@ -228,7 +228,11 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 	cmd.Stderr = m.resolveStderr()
 
 	// 8. Non-Interactive Pipe Handling (V-14 / Phase 1: Prevent Agent Loops Hanging on Stdin)
-	isInteractive := m.detector.IsTerminal(os.Stdin) && !m.opts.NonInteractive
+	detector := m.detector
+	if detector == nil {
+		detector = pty.NewDetector()
+	}
+	isInteractive := detector.IsTerminal(os.Stdin) && !m.opts.NonInteractive
 	if isInteractive {
 		cmd.Stdin = m.resolveStdin()
 	} else {
