@@ -194,6 +194,8 @@ const profileTemplate = `;; Airlock Hardened Confinement Policy
 ;; Direct external networking permitted for development
 (allow network-outbound (to tcp "*:443") (to tcp "*:80"))
 (allow network-outbound (to udp "*:53"))
+(allow network-outbound (to tcp "*:53"))
+(allow network-outbound (literal "/private/var/run/mDNSResponder") (literal "/var/run/mDNSResponder"))
 {{else}}
 (deny network*)
 {{end}}

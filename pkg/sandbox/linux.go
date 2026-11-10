@@ -198,6 +198,17 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 		args = append(args, "--ro-bind-try", sysDir, sysDir)
 	}
 
+	// Mount DNS stub resolver configurations (e.g. systemd-resolved stub in /run)
+	if resolvedTarget, err := filepath.EvalSymlinks("/etc/resolv.conf"); err == nil && resolvedTarget != "/etc/resolv.conf" {
+		targetDir := filepath.Dir(resolvedTarget)
+		args = append(args, "--ro-bind-try", targetDir, targetDir)
+		args = append(args, "--ro-bind-try", resolvedTarget, resolvedTarget)
+	}
+	args = append(args,
+		"--ro-bind-try", "/run/systemd/resolve", "/run/systemd/resolve",
+		"--ro-bind-try", "/run/resolvconf", "/run/resolvconf",
+	)
+
 	// Virtual filesystems
 	args = append(args,
 		"--proc", "/proc",
