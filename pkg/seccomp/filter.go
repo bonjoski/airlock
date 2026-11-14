@@ -87,19 +87,33 @@ type Filter interface {
 
 // BPFFilter implements the Filter interface for process isolation.
 type BPFFilter struct {
-	extraBlocked []uint32
+	extraBlocked  []uint32
+	ioUringPolicy IoUringPolicy
 }
 
-// NewFilter creates a new seccomp BPF filter synthesizer.
+// NewFilter creates a new seccomp BPF filter synthesizer with default fail-closed policies.
 func NewFilter() *BPFFilter {
-	return &BPFFilter{}
+	return &BPFFilter{
+		ioUringPolicy: IoUringPolicyBlockAll,
+	}
 }
 
 // NewFilterWithBlocked creates a filter with additional pre-blocked syscalls.
 func NewFilterWithBlocked(extra []uint32) *BPFFilter {
 	return &BPFFilter{
-		extraBlocked: append([]uint32(nil), extra...),
+		extraBlocked:  append([]uint32(nil), extra...),
+		ioUringPolicy: IoUringPolicyBlockAll,
 	}
+}
+
+// SetIoUringPolicy configures the policy for Linux io_uring syscalls (425, 426, 427).
+func (f *BPFFilter) SetIoUringPolicy(policy IoUringPolicy) {
+	f.ioUringPolicy = policy
+}
+
+// IoUringPolicy returns the current io_uring posture.
+func (f *BPFFilter) IoUringPolicy() IoUringPolicy {
+	return f.ioUringPolicy
 }
 
 // AddBlocked adds additional architecture-specific syscall numbers to the blocked set.
@@ -173,6 +187,11 @@ func (f *BPFFilter) CompileInstructions(arch string) ([]SockFilter, error) {
 	blocked := make([]uint32, 0, len(cfg.Blocked)+len(f.extraBlocked))
 	seen := make(map[uint32]bool)
 	for _, nr := range cfg.Blocked {
+		// Under IoUringPolicyRestricted, io_uring_enter (426) and io_uring_register (427)
+		// are not in the raw deny list (register is deeply inspected below).
+		if f.ioUringPolicy == IoUringPolicyRestricted && (nr == SyscallIoUringEnter || nr == SyscallIoUringRegister) {
+			continue
+		}
 		if !seen[nr] {
 			blocked = append(blocked, nr)
 			seen[nr] = true
@@ -185,33 +204,50 @@ func (f *BPFFilter) CompileInstructions(arch string) ([]SockFilter, error) {
 		}
 	}
 
-	// Calculate instruction layout
-	// 0: Load arch
-	// 1: JEQ AuditArch -> skip 1 (go to 3) else go to 2
-	// 2: RET KILL
-	// 3: Load NR
-	// [4 .. 4+len(Blocked)-1]: Blocked syscall checks
-	// [4+len(Blocked)]: JEQ IoctlNr -> jump to ioctl inspection
-	// [4+len(Blocked)+1]: RET ALLOW (for non-blocked, non-ioctl syscalls)
-	// [4+len(Blocked)+2]: Load args[1] (ioctl cmd)
-	// [4+len(Blocked)+3]: JEQ TIOCSTI -> jump to deny
-	// [4+len(Blocked)+4]: RET ALLOW (safe ioctl)
-	// [4+len(Blocked)+5]: RET ERRNO (deny)
-
 	numBlocked := len(blocked)
 	baseBlockedIdx := 4
 	if cfg.AuditArch == AUDIT_ARCH_X86_64 {
 		// Reserve 2 instructions to reject x32 ABI syscalls (nr >= 0x40000000)
 		baseBlockedIdx = 6
 	}
-	idxIoctlCheck := baseBlockedIdx + numBlocked
-	idxAllowNonIoctl := idxIoctlCheck + 1
-	idxLoadIoctlCmd := idxAllowNonIoctl + 1
-	idxCheckTiocsti := idxLoadIoctlCmd + 1
-	idxAllowSafeIoctl := idxCheckTiocsti + 1
-	idxDeny := idxAllowSafeIoctl + 1
 
-	totalInsts := idxDeny + 1
+	// Calculate instruction layout based on policy
+	var (
+		idxIoctlCheck        int
+		idxIoUringRegCheck   int
+		idxAllowNormal       int
+		idxLoadIoctlCmd      int
+		idxCheckTiocsti      int
+		idxAllowSafeIoctl    int
+		idxLoadRegisterCmd   int
+		idxCheckPersonality  int
+		idxAllowSafeRegister int
+		idxDeny              int
+		totalInsts           int
+	)
+
+	if f.ioUringPolicy == IoUringPolicyRestricted {
+		idxIoctlCheck = baseBlockedIdx + numBlocked
+		idxIoUringRegCheck = idxIoctlCheck + 1
+		idxAllowNormal = idxIoUringRegCheck + 1
+		idxLoadIoctlCmd = idxAllowNormal + 1
+		idxCheckTiocsti = idxLoadIoctlCmd + 1
+		idxAllowSafeIoctl = idxCheckTiocsti + 1
+		idxLoadRegisterCmd = idxAllowSafeIoctl + 1
+		idxCheckPersonality = idxLoadRegisterCmd + 1
+		idxAllowSafeRegister = idxCheckPersonality + 1
+		idxDeny = idxAllowSafeRegister + 1
+		totalInsts = idxDeny + 1
+	} else {
+		idxIoctlCheck = baseBlockedIdx + numBlocked
+		idxAllowNormal = idxIoctlCheck + 1
+		idxLoadIoctlCmd = idxAllowNormal + 1
+		idxCheckTiocsti = idxLoadIoctlCmd + 1
+		idxAllowSafeIoctl = idxCheckTiocsti + 1
+		idxDeny = idxAllowSafeIoctl + 1
+		totalInsts = idxDeny + 1
+	}
+
 	instructions := make([]SockFilter, 0, totalInsts)
 
 	// 1. Verify architecture
@@ -249,6 +285,14 @@ func (f *BPFFilter) CompileInstructions(arch string) ([]SockFilter, error) {
 		Jump(BPF_JMP|BPF_JEQ|BPF_K, cfg.IoctlNr, jtIoctl, 0),
 	)
 
+	// 4b. io_uring_register syscall check (only under IoUringPolicyRestricted)
+	if f.ioUringPolicy == IoUringPolicyRestricted {
+		jtIoUring := uint8(idxLoadRegisterCmd - idxIoUringRegCheck - 1)
+		instructions = append(instructions,
+			Jump(BPF_JMP|BPF_JEQ|BPF_K, SyscallIoUringRegister, jtIoUring, 0),
+		)
+	}
+
 	// 5. Default allow for normal syscalls
 	instructions = append(instructions,
 		Stmt(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
@@ -270,7 +314,26 @@ func (f *BPFFilter) CompileInstructions(arch string) ([]SockFilter, error) {
 		Stmt(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
 	)
 
-	// 9. Deny return
+	// 9. io_uring_register deep inspection (only under IoUringPolicyRestricted)
+	if f.ioUringPolicy == IoUringPolicyRestricted {
+		// Load lower 32-bits of args[1] (register opcode)
+		instructions = append(instructions,
+			Stmt(BPF_LD|BPF_W|BPF_ABS, SeccompDataArgsOffset+8),
+		)
+
+		// Check if register opcode is IORING_REGISTER_PERSONALITY (9) -> deny
+		jtPersonality := uint8(idxDeny - idxCheckPersonality - 1)
+		instructions = append(instructions,
+			Jump(BPF_JMP|BPF_JEQ|BPF_K, IORING_REGISTER_PERSONALITY, jtPersonality, 0),
+		)
+
+		// Safe io_uring_register opcode allow
+		instructions = append(instructions,
+			Stmt(BPF_RET|BPF_K, SECCOMP_RET_ALLOW),
+		)
+	}
+
+	// 10. Deny return
 	instructions = append(instructions,
 		Stmt(BPF_RET|BPF_K, SECCOMP_RET_ERRNO|EPERM),
 	)
