@@ -58,12 +58,6 @@ func NewLinuxEngine(opts Options) (*LinuxEngine, error) {
 		bwrapPath: bwrapPath,
 	}
 
-	if strings.EqualFold(opts.Profile, "web-worker") || strings.EqualFold(opts.Profile, "web_worker") {
-		if wwFilter, err := profile.BuildWebWorkerSeccomp(runtime.GOARCH); err == nil && wwFilter != nil {
-			eng.seccomp = wwFilter
-		}
-	}
-
 	// Verify fail-closed user namespace availability on Linux hosts (V-07)
 	if runtime.GOOS == "linux" {
 		if err := eng.CheckUserNamespaces(); err != nil {

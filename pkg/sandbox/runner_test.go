@@ -60,7 +60,7 @@ func TestRunner_Execute_StandardProfile(t *testing.T) {
 	}
 
 	if !res.Success() {
-		t.Fatalf("expected res.Success() == true, got code=%d, err=%s", res.ExitCode, res.Error)
+		t.Fatalf("expected res.Success() == true, got code=%d, err=%s, stderr=%s, stdout=%s", res.ExitCode, res.Error, res.Stderr, res.Stdout)
 	}
 
 	if !strings.Contains(res.Stdout, "standard_profile_test_output") {
@@ -140,8 +140,8 @@ func TestRunner_OutputStreaming(t *testing.T) {
 }
 
 func TestRunner_Execute_MCPGatewayProfile(t *testing.T) {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
-		t.Skip("skipping runner execution test on unsupported OS")
+	if runtime.GOOS != "darwin" {
+		t.Skip("skipping specialized mcp-gateway live runner test on non-darwin platform (tested via LinuxEngine argument synthesis)")
 	}
 
 	tempDir := t.TempDir()
@@ -171,7 +171,7 @@ func TestRunner_Execute_MCPGatewayProfile(t *testing.T) {
 	}
 
 	if !res.Success() {
-		t.Fatalf("expected res.Success() == true, got code=%d, err=%s", res.ExitCode, res.Error)
+		t.Fatalf("expected res.Success() == true, got code=%d, err=%s, stderr=%s, stdout=%s", res.ExitCode, res.Error, res.Stderr, res.Stdout)
 	}
 
 	if !strings.Contains(res.Stdout, "mcp_gateway_test_output") {
@@ -180,8 +180,8 @@ func TestRunner_Execute_MCPGatewayProfile(t *testing.T) {
 }
 
 func TestRunner_Execute_WebWorkerProfile(t *testing.T) {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
-		t.Skip("skipping runner execution test on unsupported OS")
+	if runtime.GOOS != "darwin" {
+		t.Skip("skipping specialized web-worker live runner test on non-darwin platform (tested via LinuxEngine argument synthesis)")
 	}
 
 	tempDir := t.TempDir()
@@ -211,7 +211,7 @@ func TestRunner_Execute_WebWorkerProfile(t *testing.T) {
 	}
 
 	if !res.Success() {
-		t.Fatalf("expected res.Success() == true, got code=%d, err=%s", res.ExitCode, res.Error)
+		t.Fatalf("expected res.Success() == true, got code=%d, err=%s, stderr=%s, stdout=%s", res.ExitCode, res.Error, res.Stderr, res.Stdout)
 	}
 
 	if !strings.Contains(res.Stdout, "web_worker_test_output") {
