@@ -157,3 +157,53 @@ func TestAdversarial_DevAgentProfileCredentialProtection(t *testing.T) {
 	}
 	t.Log("PASS: dev-agent profile strictly denies read access to all host credential roots including ~/.config/gh")
 }
+
+// ADV-P3-07: MCP-Gateway Profile Anti-Loopback and Cloud Credential Confinement (CVE-2026-125926)
+func TestAdversarial_MCPGatewayProfileProtection(t *testing.T) {
+	mcpCfg, err := config.GetBuiltinProfile(config.ProfileMCPGateway)
+	if err != nil {
+		t.Fatalf("failed to load mcp-gateway profile: %v", err)
+	}
+
+	if !mcpCfg.Network.AntiLoopback {
+		t.Fatalf("CRITICAL: mcp-gateway profile must enforce AntiLoopback!")
+	}
+
+	criticalPaths := []string{"~/.ssh", "~/.aws", "~/.gnupg", "~/.kube", "~/.config/gh", "~/.azure", "/var/run/docker.sock", ".env"}
+	for _, p := range criticalPaths {
+		found := false
+		for _, denied := range mcpCfg.Filesystem.DenyRead {
+			if denied == p {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("CRITICAL: mcp-gateway profile failed to deny access to %q!", p)
+		}
+	}
+	t.Log("PASS: mcp-gateway profile strictly denies access to cloud credentials, sockets, and loopback")
+}
+
+// ADV-P3-08: Web-Worker Profile AntiFox Webshell Execution Defense
+func TestAdversarial_WebWorkerProfileProtection(t *testing.T) {
+	wwCfg, err := config.GetBuiltinProfile(config.ProfileWebWorker)
+	if err != nil {
+		t.Fatalf("failed to load web-worker profile: %v", err)
+	}
+
+	shellDenials := []string{"/bin/sh", "/bin/bash", "/bin/zsh", "/usr/bin/python3", "/usr/bin/perl"}
+	for _, p := range shellDenials {
+		found := false
+		for _, denied := range wwCfg.Filesystem.DenyRead {
+			if denied == p {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("CRITICAL: web-worker profile failed to deny access to shell binary %q!", p)
+		}
+	}
+	t.Log("PASS: web-worker profile strictly denies execution access to shell interpreters")
+}

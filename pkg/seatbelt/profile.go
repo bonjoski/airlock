@@ -363,6 +363,8 @@ func (g *ProfileGenerator) Generate(p Params) (string, error) {
 		strings.EqualFold(p.Profile, "anti_loopback") ||
 		strings.EqualFold(p.Profile, "dev-agent") ||
 		strings.EqualFold(p.Profile, "dev_agent") ||
+		strings.EqualFold(p.Profile, "mcp-gateway") ||
+		strings.EqualFold(p.Profile, "mcp_gateway") ||
 		strings.EqualFold(p.Profile, "agent") ||
 		strings.EqualFold(p.Profile, "strict-agent") {
 		p.AntiLoopback = true
@@ -388,7 +390,8 @@ func (g *ProfileGenerator) Generate(p Params) (string, error) {
 	}
 
 	selectedTemplate := profileTemplate
-	if strings.EqualFold(p.Profile, "dev-agent") || strings.EqualFold(p.Profile, "dev_agent") {
+	if strings.EqualFold(p.Profile, "dev-agent") || strings.EqualFold(p.Profile, "dev_agent") ||
+		strings.EqualFold(p.Profile, "mcp-gateway") || strings.EqualFold(p.Profile, "mcp_gateway") {
 		selectedTemplate = devAgentProfileTemplate
 	}
 
@@ -415,5 +418,18 @@ func (g *ProfileGenerator) GenerateDevAgent(p Params) (string, error) {
 func (g *ProfileGenerator) GenerateAntiLoopback(p Params) (string, error) {
 	p.Profile = "anti-loopback"
 	p.AntiLoopback = true
+	return g.Generate(p)
+}
+
+// GenerateMCPGateway renders the dedicated mcp-gateway Seatbelt profile.
+func (g *ProfileGenerator) GenerateMCPGateway(p Params) (string, error) {
+	p.Profile = "mcp-gateway"
+	p.AntiLoopback = true
+	return g.Generate(p)
+}
+
+// GenerateWebWorker renders the dedicated web-worker Seatbelt profile.
+func (g *ProfileGenerator) GenerateWebWorker(p Params) (string, error) {
+	p.Profile = "web-worker"
 	return g.Generate(p)
 }

@@ -296,3 +296,112 @@ func TestLinuxEngine_BuildBwrapArgs_DevAgent(t *testing.T) {
 		t.Errorf("Airgap must always unshare network even if AllowDirectNet is set: %s", airgapArgsStr)
 	}
 }
+
+func TestLinuxEngine_BuildBwrapArgs_MCPGateway(t *testing.T) {
+	tempDir := t.TempDir()
+	sc, err := scratch.New(tempDir)
+	if err != nil {
+		t.Fatalf("failed to initialize scratch manager: %v", err)
+	}
+	defer sc.Cleanup()
+
+	filter := seccomp.NewFilter()
+	seccompFile, err := filter.CreateFilterFile("amd64")
+	if err != nil {
+		t.Fatalf("failed to create seccomp filter file: %v", err)
+	}
+	defer func() {
+		_ = seccompFile.Close()
+		_ = os.Remove(seccompFile.Name())
+	}()
+
+	opts := Options{
+		WorkspaceRoot:  filepath.Join(tempDir, "workspace"),
+		Profile:        "mcp-gateway",
+		Airgap:         false,
+		AllowDirectNet: false,
+	}
+
+	eng := &LinuxEngine{
+		opts:      opts,
+		bwrapPath: "/usr/bin/bwrap",
+		seccomp:   filter,
+		cacheMgr:  cache.NewManager(),
+	}
+
+	mockHome := filepath.Join(tempDir, "home")
+	args, err := eng.BuildBwrapArgs(sc, seccompFile, mockHome)
+	if err != nil {
+		t.Fatalf("BuildBwrapArgs failed: %v", err)
+	}
+
+	argsStr := strings.Join(args, " ")
+
+	if !strings.Contains(argsStr, "--cap-drop ALL") {
+		t.Errorf("mcp-gateway bwrap args missing --cap-drop ALL: %s", argsStr)
+	}
+	if !strings.Contains(argsStr, "/proc/sys") {
+		t.Errorf("mcp-gateway bwrap args missing /proc/sys masking: %s", argsStr)
+	}
+	if !strings.Contains(argsStr, filepath.Join(mockHome, ".azure")) {
+		t.Errorf("mcp-gateway bwrap args missing ~/.azure masking: %s", argsStr)
+	}
+	if !strings.Contains(argsStr, filepath.Join(mockHome, ".ssh")) {
+		t.Errorf("mcp-gateway bwrap args missing ~/.ssh masking: %s", argsStr)
+	}
+	if !strings.Contains(argsStr, "--unshare-net") {
+		t.Errorf("mcp-gateway without AllowDirectNet must unshare network: %s", argsStr)
+	}
+}
+
+func TestLinuxEngine_BuildBwrapArgs_WebWorker(t *testing.T) {
+	tempDir := t.TempDir()
+	sc, err := scratch.New(tempDir)
+	if err != nil {
+		t.Fatalf("failed to initialize scratch manager: %v", err)
+	}
+	defer sc.Cleanup()
+
+	filter := seccomp.NewFilter()
+	seccompFile, err := filter.CreateFilterFile("amd64")
+	if err != nil {
+		t.Fatalf("failed to create seccomp filter file: %v", err)
+	}
+	defer func() {
+		_ = seccompFile.Close()
+		_ = os.Remove(seccompFile.Name())
+	}()
+
+	workspace := filepath.Join(tempDir, "webroot")
+	opts := Options{
+		WorkspaceRoot:  workspace,
+		Profile:        "web-worker",
+		Airgap:         false,
+		AllowDirectNet: true,
+	}
+
+	eng := &LinuxEngine{
+		opts:      opts,
+		bwrapPath: "/usr/bin/bwrap",
+		seccomp:   filter,
+		cacheMgr:  cache.NewManager(),
+	}
+
+	mockHome := filepath.Join(tempDir, "home")
+	args, err := eng.BuildBwrapArgs(sc, seccompFile, mockHome)
+	if err != nil {
+		t.Fatalf("BuildBwrapArgs failed: %v", err)
+	}
+
+	argsStr := strings.Join(args, " ")
+
+	if !strings.Contains(argsStr, "--cap-drop ALL") {
+		t.Errorf("web-worker bwrap args missing --cap-drop ALL: %s", argsStr)
+	}
+	if !strings.Contains(argsStr, "--ro-bind "+workspace) {
+		t.Errorf("web-worker bwrap args missing --ro-bind for workspace: %s", argsStr)
+	}
+	if !strings.Contains(argsStr, "--tmpfs "+sc.Root()) {
+		t.Errorf("web-worker bwrap args missing --tmpfs for scratch: %s", argsStr)
+	}
+}

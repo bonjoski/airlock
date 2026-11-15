@@ -177,3 +177,87 @@ func TestGetBuiltinProfile_DevAgent(t *testing.T) {
 		}
 	}
 }
+
+func TestGetBuiltinProfile_MCPGateway(t *testing.T) {
+	for _, name := range []string{ProfileMCPGateway, "mcp_gateway"} {
+		cfg, err := GetBuiltinProfile(name)
+		if err != nil {
+			t.Fatalf("expected profile %q to load, got error: %v", name, err)
+		}
+
+		if cfg.Mode != ModeStrict {
+			t.Fatalf("expected ModeStrict, got %s", cfg.Mode)
+		}
+
+		if !cfg.Network.AntiLoopback {
+			t.Fatalf("mcp-gateway profile must enforce anti-loopback")
+		}
+
+		// Verify denied credential paths including ~/.azure and /var/run/docker.sock
+		expectedDenies := []string{"~/.ssh", "~/.aws", "~/.gnupg", "~/.kube", "~/.config/gh", "~/.azure", "/var/run/docker.sock", ".env"}
+		for _, req := range expectedDenies {
+			found := false
+			for _, p := range cfg.Filesystem.DenyRead {
+				if p == req {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("mcp-gateway profile missing required deny path %q: %v", req, cfg.Filesystem.DenyRead)
+			}
+		}
+
+		// Verify vetting is enforced
+		if !cfg.Vetting.Enable || !cfg.Vetting.Strict {
+			t.Fatalf("mcp-gateway profile must enforce strict vetting")
+		}
+	}
+}
+
+func TestGetBuiltinProfile_WebWorker(t *testing.T) {
+	for _, name := range []string{ProfileWebWorker, "web_worker"} {
+		cfg, err := GetBuiltinProfile(name)
+		if err != nil {
+			t.Fatalf("expected profile %q to load, got error: %v", name, err)
+		}
+
+		if cfg.Mode != ModeStrict {
+			t.Fatalf("expected ModeStrict, got %s", cfg.Mode)
+		}
+
+		// Verify shell denials in deny read
+		expectedShellDenials := []string{"/bin/sh", "/bin/bash", "/bin/zsh", "/usr/bin/python3", "/usr/bin/perl"}
+		for _, req := range expectedShellDenials {
+			found := false
+			for _, p := range cfg.Filesystem.DenyRead {
+				if p == req {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("web-worker profile missing required shell denial %q: %v", req, cfg.Filesystem.DenyRead)
+			}
+		}
+
+		// Verify host credential protection
+		for _, req := range []string{"~/.ssh", "~/.aws", ".env"} {
+			found := false
+			for _, p := range cfg.Filesystem.DenyRead {
+				if p == req {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("web-worker profile missing credential deny path %q: %v", req, cfg.Filesystem.DenyRead)
+			}
+		}
+
+		// Verify vetting is enforced
+		if !cfg.Vetting.Enable || !cfg.Vetting.Strict {
+			t.Fatalf("web-worker profile must enforce strict vetting")
+		}
+	}
+}

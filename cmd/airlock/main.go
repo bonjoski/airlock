@@ -61,6 +61,9 @@ func main() {
 	case "mcp":
 		handleMCP(os.Args[2:])
 		os.Exit(0)
+	case "profile", "profiles":
+		handleProfile(os.Args[2:])
+		os.Exit(0)
 	case "run", "exec":
 		handleRun(os.Args[2:])
 	default:
@@ -89,11 +92,12 @@ Usage:
   airlock shim uninstall [--target <dir>]
   airlock doctor [--json] [--ai] [--workspace <path>] [--fix]
   airlock audit [list|tail|stats|export] [flags]
+  airlock profile [list]
   airlock mcp
   airlock version
 
 Flags:
-  --profile <name>      Execution profile (dev-agent, agent, strict, airgap, default)
+  --profile <name>      Execution profile (standard, agent, dev-agent, mcp-gateway, web-worker, strict, airgap, default)
   --microvm             Tier 2 Confinement via Aegisbox hypervisor MicroVM
   --lease-secret <keys> Comma-separated secrets to lease dynamically via Locksmith
   --session-ticket <tk> Session ticket for autonomous agent batch loops
@@ -212,7 +216,7 @@ func handleRun(args []string) {
 	)
 
 	fs.StringVar(&configPath, "config", "", "Path to declarative policy file")
-	fs.StringVar(&profileName, "profile", "", "Execution profile: dev-agent, agent, standard, strict, airgap, default")
+	fs.StringVar(&profileName, "profile", "", "Execution profile: standard, agent, dev-agent, mcp-gateway, web-worker, strict, airgap, default")
 	fs.BoolVar(&microvm, "microvm", false, "Tier 2 hypervisor MicroVM isolation via Aegisbox")
 	fs.StringVar(&leaseSecrets, "lease-secret", "", "Comma-separated secrets to lease via Locksmith")
 	fs.StringVar(&sessionTicket, "session-ticket", "", "Session ticket for batch agent sub-commands")
@@ -566,4 +570,22 @@ func handleMCP(args []string) {
 		fmt.Fprintf(os.Stderr, "airlock mcp: server error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func handleProfile(args []string) {
+	if len(args) > 0 && args[0] != "list" && !strings.HasPrefix(args[0], "-") {
+		fmt.Fprintf(os.Stderr, "airlock: unknown profile action %q (supported: list)\n", args[0])
+		os.Exit(1)
+	}
+
+	fmt.Println("Airlock Execution Profiles:")
+	fmt.Println("  standard     Baseline hardened sandbox for modern language runtimes (Go, Rust, Node, Python)")
+	fmt.Println("  agent        Autonomous coding assistants with anti-loopback and model API egress")
+	fmt.Println("  dev-agent    Autonomous coding agents with host credential masking (SSH, AWS, GPG, GitHub CLI)")
+	fmt.Println("  mcp-gateway  Model Context Protocol gateways with anti-loopback and credential isolation")
+	fmt.Println("  web-worker   Web application runtimes defended against webshell execution (AntiFox defense)")
+	fmt.Println("  strict       Strict pre-execution vetting and minimal filesystem mutations")
+	fmt.Println("  airgap       Total offline isolation (denies all outbound network traffic)")
+	fmt.Println("  anti-loopback Hardened anti-loopback confinement blocking host localhost probing (CVE-2026-25253)")
+	fmt.Println("  default      Default Airlock workstation sandbox")
 }

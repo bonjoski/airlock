@@ -16,6 +16,7 @@ import (
 
 	"github.com/bonjoski/airlock/pkg/cache"
 	"github.com/bonjoski/airlock/pkg/env"
+	"github.com/bonjoski/airlock/pkg/profile"
 	"github.com/bonjoski/airlock/pkg/proxy"
 	"github.com/bonjoski/airlock/pkg/pty"
 	"github.com/bonjoski/airlock/pkg/scratch"
@@ -55,6 +56,12 @@ func NewLinuxEngine(opts Options) (*LinuxEngine, error) {
 		seccomp:   seccomp.NewFilter(),
 		detector:  pty.NewDetector(),
 		bwrapPath: bwrapPath,
+	}
+
+	if strings.EqualFold(opts.Profile, "web-worker") || strings.EqualFold(opts.Profile, "web_worker") {
+		if wwFilter, err := profile.BuildWebWorkerSeccomp(runtime.GOARCH); err == nil && wwFilter != nil {
+			eng.seccomp = wwFilter
+		}
 	}
 
 	// Verify fail-closed user namespace availability on Linux hosts (V-07)
@@ -181,6 +188,8 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 			strings.EqualFold(l.opts.Profile, "agent") ||
 			strings.EqualFold(l.opts.Profile, "dev-agent") ||
 			strings.EqualFold(l.opts.Profile, "dev_agent") ||
+			strings.EqualFold(l.opts.Profile, "mcp-gateway") ||
+			strings.EqualFold(l.opts.Profile, "mcp_gateway") ||
 			strings.EqualFold(l.opts.Profile, "strict-agent"))) {
 		args = append(args, "--unshare-net")
 	}
@@ -339,8 +348,17 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 		}
 	}
 
-	// dev-agent profile extra hardening: capability dropping and /proc masking
-	if strings.EqualFold(l.opts.Profile, "dev-agent") || strings.EqualFold(l.opts.Profile, "dev_agent") {
+	// Profile-specific sandbox hardening & capability dropping
+	switch {
+	case strings.EqualFold(l.opts.Profile, "mcp-gateway") || strings.EqualFold(l.opts.Profile, "mcp_gateway"):
+		args = profile.AugmentBwrapArgsForMCPGateway(args, userHome, unreadableMask)
+	case strings.EqualFold(l.opts.Profile, "web-worker") || strings.EqualFold(l.opts.Profile, "web_worker"):
+		scratchPath := ""
+		if sc != nil {
+			scratchPath = sc.Root()
+		}
+		args = profile.AugmentBwrapArgsForWebWorker(args, l.opts.WorkspaceRoot, scratchPath)
+	case strings.EqualFold(l.opts.Profile, "dev-agent") || strings.EqualFold(l.opts.Profile, "dev_agent"):
 		args = append(args,
 			"--cap-drop", "ALL",
 			"--ro-bind-try", unreadableMask, "/proc/sys",

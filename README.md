@@ -285,6 +285,11 @@ Executes commands inside kernel-confined isolation:
 airlock run -- npm test
 airlock run --airgap -- pytest
 airlock run --allow-domain api.openai.com -- python agent.py
+
+# Run with specialized security execution profiles
+airlock run --profile dev-agent -- claude
+airlock run --profile mcp-gateway -- mcp-server
+airlock run --profile web-worker -- node server.js
 ```
 
 ### 2. `airlock doctor`
@@ -362,6 +367,22 @@ airlock shim install
 airlock shim list
 airlock shim uninstall
 ```
+
+### 7. `airlock profile list`
+List and inspect built-in execution confinement profiles:
+```bash
+airlock profile list
+```
+Supported profiles:
+- `standard`: Baseline hardened development sandbox with modern language registries permitted.
+- `agent`: Autonomous coding assistants with anti-loopback and LLM API egress.
+- `dev-agent`: Autonomous coding agents with strict credential isolation (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.config/gh`).
+- `mcp-gateway`: Model Context Protocol servers/registries with anti-loopback and credential isolation (CVE-2026-125926).
+- `web-worker`: Web application runtimes defended against child webshell execution (AntiFox defense).
+- `strict`: Strict pre-execution AST vetting and minimal filesystem mutations.
+- `airgap`: Total offline isolation (denies all outbound network traffic).
+- `anti-loopback`: Confinement blocking localhost/127.0.0.1 probing (CVE-2026-25253).
+- `default`: Baseline Airlock workstation confinement.
 
 ---
 

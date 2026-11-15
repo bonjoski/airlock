@@ -10,6 +10,8 @@ const (
 	ProfileStandard     = "standard"
 	ProfileAgent        = "agent"
 	ProfileDevAgent     = "dev-agent"
+	ProfileMCPGateway   = "mcp-gateway"
+	ProfileWebWorker    = "web-worker"
 	ProfileDefault      = "default"
 	ProfileStrict       = "strict"
 	ProfileAirgap       = "airgap"
@@ -124,6 +126,32 @@ var DevAgentDefaultSecrets = []string{
 	"ANTHROPIC_API_KEY",
 	"GITHUB_TOKEN",
 	"GEMINI_API_KEY",
+}
+
+// MCPGatewayDefaultDenyPaths defines forbidden host credential directories for mcp-gateway (CVE-2026-125926).
+var MCPGatewayDefaultDenyPaths = []string{
+	"~/.ssh",
+	"~/.aws",
+	"~/.gnupg",
+	"~/.kube",
+	"~/.config/gh",
+	"~/.config/gcloud",
+	"~/.azure",
+	"/var/run/docker.sock",
+	".env",
+	".env.*",
+}
+
+// WebWorkerDefaultShellDenials defines forbidden shell and scripting runtimes for web-worker (AntiFox defense).
+var WebWorkerDefaultShellDenials = []string{
+	"/bin/sh",
+	"/bin/bash",
+	"/bin/zsh",
+	"/bin/csh",
+	"/bin/tcsh",
+	"/bin/ksh",
+	"/usr/bin/python3",
+	"/usr/bin/perl",
 }
 
 // GetBuiltinProfile constructs a pre-configured, hardened policy for known execution profiles.
@@ -252,8 +280,62 @@ func GetBuiltinProfile(name string) (*Config, error) {
 
 		return cfg, nil
 
+	case ProfileMCPGateway, "mcp_gateway":
+		cfg := DefaultConfig()
+		cfg.Version = "1"
+		cfg.Mode = ModeStrict
+
+		// 1. Network: Anti-loopback enforced (CVE-2026-125926), LLM & standard registries
+		cfg.Network.Airgap = false
+		cfg.Network.AntiLoopback = true
+		cfg.Network.AllowDomains = make([]string, len(AgentDefaultAllowDomains))
+		copy(cfg.Network.AllowDomains, AgentDefaultAllowDomains)
+		cfg.Network.UnknownDomainAction = "refused"
+
+		// 2. Filesystem: Strict credential and socket masks
+		cfg.Filesystem.DenyRead = make([]string, len(MCPGatewayDefaultDenyPaths))
+		copy(cfg.Filesystem.DenyRead, MCPGatewayDefaultDenyPaths)
+		cfg.Filesystem.DenyWrite = append(cfg.Filesystem.DenyRead, ".git")
+
+		// 3. Static Analysis: Mandatory pre-execution AST inspection via Argus
+		cfg.Vetting.Enable = true
+		cfg.Vetting.Strict = true
+
+		// 4. Interactive: Non-interactive fail-closed defaults
+		cfg.Interactive.PromptOnUnknownDomain = false
+		cfg.Interactive.PromptTimeoutSec = 5
+
+		return cfg, nil
+
+	case ProfileWebWorker, "web_worker":
+		cfg := DefaultConfig()
+		cfg.Version = "1"
+		cfg.Mode = ModeStrict
+
+		// 1. Network: Pinned language runtimes / registries by default
+		cfg.Network.Airgap = false
+		cfg.Network.AllowDomains = make([]string, len(StandardDefaultAllowDomains))
+		copy(cfg.Network.AllowDomains, StandardDefaultAllowDomains)
+		cfg.Network.UnknownDomainAction = "refused"
+
+		// 2. Filesystem: Confined read access with shell execution blockers (AntiFox defense) and credential masking
+		cfg.Filesystem.DenyRead = make([]string, 0, len(DevAgentDefaultDenyPaths)+len(WebWorkerDefaultShellDenials))
+		cfg.Filesystem.DenyRead = append(cfg.Filesystem.DenyRead, DevAgentDefaultDenyPaths...)
+		cfg.Filesystem.DenyRead = append(cfg.Filesystem.DenyRead, WebWorkerDefaultShellDenials...)
+		cfg.Filesystem.DenyWrite = append([]string{".git"}, WebWorkerDefaultShellDenials...)
+
+		// 3. Static Analysis: Mandatory pre-execution AST inspection via Argus
+		cfg.Vetting.Enable = true
+		cfg.Vetting.Strict = true
+
+		// 4. Interactive: Non-interactive fail-closed defaults
+		cfg.Interactive.PromptOnUnknownDomain = false
+		cfg.Interactive.PromptTimeoutSec = 5
+
+		return cfg, nil
+
 	default:
-		return nil, fmt.Errorf("unknown execution profile %q (available: standard, agent, dev-agent, strict, airgap, anti-loopback, default)", name)
+		return nil, fmt.Errorf("unknown execution profile %q (available: standard, agent, dev-agent, mcp-gateway, web-worker, strict, airgap, anti-loopback, default)", name)
 	}
 }
 

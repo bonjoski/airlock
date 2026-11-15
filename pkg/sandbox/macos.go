@@ -14,6 +14,7 @@ import (
 
 	"github.com/bonjoski/airlock/pkg/cache"
 	"github.com/bonjoski/airlock/pkg/env"
+	"github.com/bonjoski/airlock/pkg/profile"
 	"github.com/bonjoski/airlock/pkg/proxy"
 	"github.com/bonjoski/airlock/pkg/pty"
 	"github.com/bonjoski/airlock/pkg/scratch"
@@ -159,6 +160,7 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 	antiLoopback := m.opts.AntiLoopback
 	if m.opts.Profile == "anti-loopback" || m.opts.Profile == "anti_loopback" ||
 		m.opts.Profile == "dev-agent" || m.opts.Profile == "dev_agent" ||
+		m.opts.Profile == "mcp-gateway" || m.opts.Profile == "mcp_gateway" ||
 		m.opts.Profile == "agent" || m.opts.Profile == "strict-agent" {
 		antiLoopback = true
 	}
@@ -180,7 +182,17 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 		ExtraDenyWrite:       m.opts.ExtraDenyWrite,
 	}
 
-	profileStr, err := m.generator.Generate(seatbeltParams)
+	var profileStr string
+	switch strings.ToLower(m.opts.Profile) {
+	case "mcp-gateway", "mcp_gateway":
+		profileStr, err = profile.GenerateMCPGatewaySeatbelt(seatbeltParams)
+	case "web-worker", "web_worker":
+		profileStr, err = profile.GenerateWebWorkerSeatbelt(seatbeltParams)
+	case "dev-agent", "dev_agent":
+		profileStr, err = profile.GenerateDevAgentSeatbelt(seatbeltParams)
+	default:
+		profileStr, err = m.generator.Generate(seatbeltParams)
+	}
 	if err != nil {
 		return 1, fmt.Errorf("sandbox: failed to synthesize Seatbelt profile: %w", err)
 	}

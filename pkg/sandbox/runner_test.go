@@ -138,3 +138,83 @@ func TestRunner_OutputStreaming(t *testing.T) {
 		t.Errorf("expected res.Stdout to contain output, got: %q", res.Stdout)
 	}
 }
+
+func TestRunner_Execute_MCPGatewayProfile(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("skipping runner execution test on unsupported OS")
+	}
+
+	tempDir := t.TempDir()
+	workspace := filepath.Join(tempDir, "workspace")
+	if err := os.Mkdir(workspace, 0755); err != nil {
+		t.Fatalf("failed to create temp workspace: %v", err)
+	}
+
+	runner := NewRunner()
+	ctx := context.Background()
+
+	opts := SandboxOpts{
+		Profile:        "mcp-gateway",
+		WorkspaceRoot:  workspace,
+		Airgap:         true,
+		NonInteractive: true,
+	}
+
+	echoBin := "/bin/echo"
+	if _, err := os.Stat(echoBin); err != nil {
+		echoBin = "echo"
+	}
+
+	res, err := runner.Execute(ctx, []string{echoBin, "mcp_gateway_test_output"}, opts)
+	if err != nil {
+		t.Fatalf("runner.Execute failed: %v", err)
+	}
+
+	if !res.Success() {
+		t.Fatalf("expected res.Success() == true, got code=%d, err=%s", res.ExitCode, res.Error)
+	}
+
+	if !strings.Contains(res.Stdout, "mcp_gateway_test_output") {
+		t.Fatalf("expected stdout to contain test string, got: %q", res.Stdout)
+	}
+}
+
+func TestRunner_Execute_WebWorkerProfile(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("skipping runner execution test on unsupported OS")
+	}
+
+	tempDir := t.TempDir()
+	workspace := filepath.Join(tempDir, "workspace")
+	if err := os.Mkdir(workspace, 0755); err != nil {
+		t.Fatalf("failed to create temp workspace: %v", err)
+	}
+
+	runner := NewRunner()
+	ctx := context.Background()
+
+	opts := SandboxOpts{
+		Profile:        "web-worker",
+		WorkspaceRoot:  workspace,
+		Airgap:         true,
+		NonInteractive: true,
+	}
+
+	echoBin := "/bin/echo"
+	if _, err := os.Stat(echoBin); err != nil {
+		echoBin = "echo"
+	}
+
+	res, err := runner.Execute(ctx, []string{echoBin, "web_worker_test_output"}, opts)
+	if err != nil {
+		t.Fatalf("runner.Execute failed: %v", err)
+	}
+
+	if !res.Success() {
+		t.Fatalf("expected res.Success() == true, got code=%d, err=%s", res.ExitCode, res.Error)
+	}
+
+	if !strings.Contains(res.Stdout, "web_worker_test_output") {
+		t.Fatalf("expected stdout to contain test string, got: %q", res.Stdout)
+	}
+}
