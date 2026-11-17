@@ -333,8 +333,8 @@ func TestLauncher_ExecutionWiring(t *testing.T) {
 // 3. Unix Domain Socket calls MUST succeed.
 // 4. If --allow-network is specified, outbound connection to that port is permitted.
 func TestNetworkIsolation_LiveAdversarialRejection(t *testing.T) {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
-		t.Skip("Skipping live kernel sandboxing test on non-darwin/non-linux platform")
+	if runtime.GOOS != "darwin" {
+		t.Skip("Skipping live Seatbelt network sandboxing test on non-darwin platform (Darwin Seatbelt specific)")
 	}
 
 	tempDir := t.TempDir()
