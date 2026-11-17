@@ -11,6 +11,7 @@ const (
 	ProfileAgent        = "agent"
 	ProfileDevAgent     = "dev-agent"
 	ProfileMCPGateway   = "mcp-gateway"
+	ProfileMCP          = "mcp"
 	ProfileWebWorker    = "web-worker"
 	ProfileDefault      = "default"
 	ProfileStrict       = "strict"
@@ -334,8 +335,34 @@ func GetBuiltinProfile(name string) (*Config, error) {
 
 		return cfg, nil
 
+	case ProfileMCP, "mcp-wrap", "mcp_wrap":
+		cfg := DefaultConfig()
+		cfg.Version = "1"
+		cfg.Mode = ModeStrict
+
+		// 1. Network: Loopback & UDS allowed, zero WAN egress by default
+		cfg.Network.Airgap = false
+		cfg.Network.AntiLoopback = false
+		cfg.Network.AllowDomains = nil
+		cfg.Network.UnknownDomainAction = "refused"
+
+		// 2. Filesystem: Strict credential and socket masks
+		cfg.Filesystem.DenyRead = make([]string, len(MCPGatewayDefaultDenyPaths))
+		copy(cfg.Filesystem.DenyRead, MCPGatewayDefaultDenyPaths)
+		cfg.Filesystem.DenyWrite = append(cfg.Filesystem.DenyRead, ".git")
+
+		// 3. Static Analysis
+		cfg.Vetting.Enable = false
+		cfg.Vetting.Strict = false
+
+		// 4. Interactive: Non-interactive fail-closed defaults
+		cfg.Interactive.PromptOnUnknownDomain = false
+		cfg.Interactive.PromptTimeoutSec = 5
+
+		return cfg, nil
+
 	default:
-		return nil, fmt.Errorf("unknown execution profile %q (available: standard, agent, dev-agent, mcp-gateway, web-worker, strict, airgap, anti-loopback, default)", name)
+		return nil, fmt.Errorf("unknown execution profile %q (available: standard, agent, dev-agent, mcp-gateway, mcp, web-worker, strict, airgap, anti-loopback, default)", name)
 	}
 }
 

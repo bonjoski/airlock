@@ -1,0 +1,161 @@
+;; Airlock Hardened Confinement Policy — Profile: mcp
+;; Spec: RFC-2026-11-16-35 (Airlock + Bomhound Hermetic MCP Execution Wrapper)
+(version 1)
+(deny default)
+
+(define workspace-root (if (param "WORKSPACE_ROOT") (param "WORKSPACE_ROOT") "{{.WorkspaceRoot}}"))
+(define scratch-dir (if (param "SCRATCH_DIR") (param "SCRATCH_DIR") "{{.ScratchDir}}"))
+
+;; 1. Core Process Lifecycle & System Discovery
+(allow process-fork)
+(allow process-exec)
+(allow sysctl-read)
+
+;; Deny execution of macOS Keychain CLI
+(deny process-exec
+  (literal "/usr/bin/security")
+  (subpath "/usr/bin/security"))
+
+;; Process Introspection Denial
+(deny process-info* (target others))
+
+;; 2. Terminal and Pseudo-Device I/O & File Locking (Local Stdio)
+(allow file-read* file-write*
+  (literal "/dev/null")
+  (literal "/dev/zero")
+  (literal "/dev/random")
+  (literal "/dev/urandom")
+  (literal "/dev/dtracehelper")
+  (regex #"^/dev/tty.*")
+  (regex #"^/dev/ptmx.*"))
+
+;; Block controlling terminal ioctl injection such as TIOCSTI (AIR-06 / V-05)
+(deny file-ioctl (literal "/dev/tty"))
+
+(allow file-lock)
+(allow ipc-posix-shm*)
+
+;; 3. Mach IPC Hardening (Neutralize Keychain, LaunchServices, Clipboard, TCC)
+(deny mach-lookup
+  (global-name "com.apple.securityd")
+  (global-name "com.apple.CoreAuthentication.daemon")
+  (global-name "com.apple.accountsd")
+  (global-name "com.apple.keychainsharingreferent")
+  (global-name "com.apple.coreservices.launchservicesd")
+  (global-name "com.apple.pasteboard.pboard")
+  (global-name "com.apple.tccd"))
+
+(allow mach-lookup
+  (global-name "com.apple.system.logger")
+  (global-name "com.apple.system.notification_center")
+  (global-name "com.apple.trustd.agent")
+  (global-name "com.apple.trustd"))
+
+;; 4. Filesystem Read Policy: Allow system reads
+(allow file-read*)
+{{range .ExtraAllowRead}}
+(allow file-read* (subpath "{{.}}"))
+{{end}}
+
+;; 5. Filesystem Write Policy: Strictly confined to designated Workspace (project root), Scratch, and System Temp
+(deny file-write*)
+
+(allow file-write*
+  (subpath workspace-root)
+  (subpath scratch-dir)
+  (subpath "/tmp")
+  (subpath "/private/tmp"))
+{{range .ExtraAllowWrite}}
+(allow file-write* (subpath "{{.}}"))
+{{end}}
+
+;; 5b. High-Precedence Credential, Secret & Metadata Denials (AIR-01 / AIR-05)
+(deny file-read* file-write* file-link
+  (subpath "{{.UserHome}}/.ssh")
+  (subpath "{{.UserHome}}/.aws")
+  (subpath "{{.UserHome}}/.gnupg")
+  (subpath "{{.UserHome}}/.kube")
+  (subpath "{{.UserHome}}/.docker")
+  (subpath "{{.UserHome}}/.fabrial")
+  (subpath "{{.UserHome}}/.config/gh")
+  (subpath "{{.UserHome}}/.config/gcloud")
+  (literal "{{.UserHome}}/.npmrc")
+  (subpath "{{.UserHome}}/.npmrc")
+  (literal "{{.UserHome}}/.pypirc")
+  (subpath "{{.UserHome}}/.pypirc")
+  (literal "{{.UserHome}}/.netrc")
+  (subpath "{{.UserHome}}/.netrc"))
+
+{{if .UserHomeData}}
+(deny file-read* file-write* file-link
+  (subpath "{{.UserHomeData}}/.ssh")
+  (subpath "{{.UserHomeData}}/.aws")
+  (subpath "{{.UserHomeData}}/.gnupg")
+  (subpath "{{.UserHomeData}}/.kube")
+  (subpath "{{.UserHomeData}}/.docker")
+  (subpath "{{.UserHomeData}}/.fabrial")
+  (subpath "{{.UserHomeData}}/.config/gh")
+  (subpath "{{.UserHomeData}}/.config/gcloud")
+  (literal "{{.UserHomeData}}/.npmrc")
+  (subpath "{{.UserHomeData}}/.npmrc")
+  (literal "{{.UserHomeData}}/.pypirc")
+  (subpath "{{.UserHomeData}}/.pypirc")
+  (literal "{{.UserHomeData}}/.netrc")
+  (subpath "{{.UserHomeData}}/.netrc"))
+{{end}}
+
+(deny file-read* file-write* file-link
+  (regex #"^(/System/Volumes/Data)?/(Users|home)/[^/]+/\.(ssh|aws|gnupg|kube|docker|fabrial|npmrc|pypirc|netrc|config/gh|config/gcloud)"))
+
+(deny file-read* file-write* file-link
+  (literal "/var/run/docker.sock")
+  (literal "/private/var/run/docker.sock"))
+
+(deny file-read* file-write* file-link
+  (regex #"^(/private)?/tmp/com\.apple\.launchd\..*"))
+
+(deny file-read* file-write* file-link
+  (subpath (string-append workspace-root "/.env"))
+  (subpath "{{.WorkspaceRoot}}/.env")
+  (regex (string-append "^" "{{.WorkspaceRootEscaped}}" #"/(.*/)?\.env(\..+)?$"))
+  (regex (string-append "^" "{{.WorkspaceRootEscaped}}" #"/.*\.pem$"))
+  (regex (string-append "^" "{{.WorkspaceRootEscaped}}" #"/.*\.key$"))
+  (regex (string-append "^" "{{.WorkspaceRootEscaped}}" #"/(.*/)?(id_rsa|id_ed25519|id_ecdsa|id_dsa).*$"))
+  (regex (string-append "^" "{{.WorkspaceRootEscaped}}" #"/(.*/)?(secrets|service-account)\.json$")))
+{{range .ExtraDenyRead}}
+(deny file-read* file-link (subpath "{{.}}"))
+{{end}}
+
+;; Prevent Workspace poisoning: protect .git directory
+(deny file-write* file-link
+  (subpath (string-append workspace-root "/.git"))
+  (subpath "{{.WorkspaceRoot}}/.git"))
+{{range .ExtraDenyWrite}}
+(deny file-write* file-link (subpath "{{.}}"))
+{{end}}
+
+;; 6. Network Isolation Policy: Local Stdio, UDS, and Loopback Only (Zero WAN Egress by default)
+(deny network*)
+
+;; Local loopback (localhost / 127.0.0.1 / ::1)
+(allow network-inbound (local ip "localhost:*"))
+(allow network-outbound (to ip "localhost:*"))
+
+;; Unix Domain Sockets (AF_UNIX)
+(allow network* (remote unix-socket))
+(allow network* (local unix-socket))
+
+{{if .AllowedUnixSockets}}
+{{range .AllowedUnixSockets}}
+(allow network-outbound (literal "{{.}}") (subpath "{{.}}"))
+(allow file-read* file-write* (literal "{{.}}") (subpath "{{.}}"))
+{{end}}
+{{end}}
+
+{{if gt .AllowNetworkPort 0}}
+;; Allowlisted External Network Endpoint
+(allow network-outbound (to tcp "*:{{.AllowNetworkPort}}"))
+(allow network-outbound (to udp "*:53"))
+(allow network-outbound (to tcp "*:53"))
+(allow network-outbound (literal "/private/var/run/mDNSResponder") (literal "/var/run/mDNSResponder"))
+{{end}}

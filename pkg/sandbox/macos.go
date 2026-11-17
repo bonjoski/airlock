@@ -122,9 +122,10 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 		_ = sc.Cleanup()
 	}()
 
-	// 4. Start Egress Proxy (unless in airgap mode or direct network mode)
+	// 4. Start Egress Proxy (unless in airgap mode, direct network mode, or mcp hermetic wrapper)
 	var prx proxy.Proxy
-	if !m.opts.Airgap && !m.opts.AllowDirectNet {
+	isMCP := strings.EqualFold(m.opts.Profile, "mcp") || strings.EqualFold(m.opts.Profile, "mcp-wrap") || strings.EqualFold(m.opts.Profile, "mcp_wrap")
+	if !m.opts.Airgap && !m.opts.AllowDirectNet && !isMCP {
 		p, err := proxy.NewWithOptions(proxy.Options{
 			AllowedDomains: m.opts.AllowedDomains,
 			Logger:         m.opts.AuditLogger,
@@ -165,6 +166,11 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 		antiLoopback = true
 	}
 
+	extraAllowRead := append([]string(nil), m.opts.ExtraAllowRead...)
+	if m.opts.CacheDir != "" {
+		extraAllowRead = append(extraAllowRead, m.opts.CacheDir)
+	}
+
 	seatbeltParams := seatbelt.Params{
 		Profile:              m.opts.Profile,
 		UserHome:             homeDir,
@@ -176,14 +182,17 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 		AntiLoopback:         antiLoopback,
 		AllowedUnixSockets:   m.opts.AllowedUnixSockets,
 		AllowedLoopbackPorts: m.opts.AllowedLoopbackPorts,
-		ExtraAllowRead:       m.opts.ExtraAllowRead,
+		ExtraAllowRead:       extraAllowRead,
 		ExtraAllowWrite:      m.opts.ExtraAllowWrite,
 		ExtraDenyRead:        m.opts.ExtraDenyRead,
 		ExtraDenyWrite:       m.opts.ExtraDenyWrite,
+		AllowNetwork:         m.opts.AllowNetwork,
 	}
 
 	var profileStr string
 	switch strings.ToLower(m.opts.Profile) {
+	case "mcp", "mcp-wrap", "mcp_wrap":
+		profileStr, err = profile.GenerateMCPSeatbelt(seatbeltParams)
 	case "mcp-gateway", "mcp_gateway":
 		profileStr, err = profile.GenerateMCPGatewaySeatbelt(seatbeltParams)
 	case "web-worker", "web_worker":
@@ -221,6 +230,27 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 			}
 			defer cleanup()
 			sanitizedEnv = append(sanitizedEnv, fmt.Sprintf("%s=%s", secretName, string(resp.SecretValue)))
+		}
+	}
+
+	// 6c. Injected Extra Environment Variables (e.g. MCP offline configuration)
+	for _, envVar := range m.opts.ExtraEnv {
+		if idx := strings.Index(envVar, "="); idx != -1 {
+			k := envVar[:idx]
+			prefix := k + "="
+			replaced := false
+			for i, existing := range sanitizedEnv {
+				if strings.HasPrefix(existing, prefix) {
+					sanitizedEnv[i] = envVar
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				sanitizedEnv = append(sanitizedEnv, envVar)
+			}
+		} else {
+			sanitizedEnv = append(sanitizedEnv, envVar)
 		}
 	}
 

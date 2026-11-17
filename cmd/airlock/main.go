@@ -94,6 +94,7 @@ Usage:
   airlock audit [list|tail|stats|export] [flags]
   airlock profile [list]
   airlock mcp
+  airlock mcp wrap [--lockfile <path>] [--cache-dir <dir>] [--allow-network <host:port>] -- <command> [args...]
   airlock version
 
 Flags:
@@ -565,6 +566,10 @@ func handleShim(args []string) {
 }
 
 func handleMCP(args []string) {
+	if len(args) > 0 && args[0] == "wrap" {
+		handleMCPWrap(args[1:])
+		return
+	}
 	server := mcp.NewServer(os.Stdin, os.Stdout, mcp.WithVersion(version.Version))
 	if err := server.Serve(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "airlock mcp: server error: %v\n", err)

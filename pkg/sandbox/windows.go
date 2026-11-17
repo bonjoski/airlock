@@ -214,6 +214,27 @@ func (w *WindowsEngine) Execute(ctx context.Context, cmdArgs []string) (int, err
 	sanitizer := env.NewSanitizer(envConfig)
 	sanitizedEnv := sanitizer.Sanitize(os.Environ())
 
+	// Injected Extra Environment Variables (e.g. MCP offline configuration)
+	for _, envVar := range w.opts.ExtraEnv {
+		if idx := strings.Index(envVar, "="); idx != -1 {
+			k := envVar[:idx]
+			prefix := k + "="
+			replaced := false
+			for i, existing := range sanitizedEnv {
+				if strings.HasPrefix(existing, prefix) {
+					sanitizedEnv[i] = envVar
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				sanitizedEnv = append(sanitizedEnv, envVar)
+			}
+		} else {
+			sanitizedEnv = append(sanitizedEnv, envVar)
+		}
+	}
+
 	// 8. Assemble Command Execution
 	cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
 	if w.opts.WorkingDir != "" {

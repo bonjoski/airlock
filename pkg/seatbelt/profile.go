@@ -17,6 +17,9 @@ import (
 //go:embed dev-agent.sb
 var devAgentProfileTemplate string
 
+//go:embed mcp.sb
+var mcpProfileTemplate string
+
 // Params contains parameters interpolated into the Seatbelt Scheme profile.
 type Params struct {
 	Profile              string
@@ -35,6 +38,8 @@ type Params struct {
 	AntiLoopback         bool
 	AllowedUnixSockets   []string
 	AllowedLoopbackPorts []int
+	AllowNetwork         string
+	AllowNetworkPort     int
 }
 
 // Generator defines the interface for generating platform confinement profiles.
@@ -389,10 +394,27 @@ func (g *ProfileGenerator) Generate(p Params) (string, error) {
 		return "", err
 	}
 
+	if p.AllowNetwork != "" {
+		p.AllowNetwork = strings.TrimSpace(p.AllowNetwork)
+		if parts := strings.Split(p.AllowNetwork, ":"); len(parts) == 2 {
+			var port int
+			if _, err := fmt.Sscanf(parts[1], "%d", &port); err == nil && port > 0 {
+				p.AllowNetworkPort = port
+			}
+		} else {
+			var port int
+			if _, err := fmt.Sscanf(p.AllowNetwork, "%d", &port); err == nil && port > 0 {
+				p.AllowNetworkPort = port
+			}
+		}
+	}
+
 	selectedTemplate := profileTemplate
 	if strings.EqualFold(p.Profile, "dev-agent") || strings.EqualFold(p.Profile, "dev_agent") ||
 		strings.EqualFold(p.Profile, "mcp-gateway") || strings.EqualFold(p.Profile, "mcp_gateway") {
 		selectedTemplate = devAgentProfileTemplate
+	} else if strings.EqualFold(p.Profile, "mcp") || strings.EqualFold(p.Profile, "mcp-wrap") || strings.EqualFold(p.Profile, "mcp_wrap") {
+		selectedTemplate = mcpProfileTemplate
 	}
 
 	tmpl, err := template.New("seatbelt").Parse(selectedTemplate)
@@ -406,6 +428,12 @@ func (g *ProfileGenerator) Generate(p Params) (string, error) {
 	}
 
 	return buf.String(), nil
+}
+
+// GenerateMCP renders the dedicated MCP server wrapper Seatbelt profile.
+func (g *ProfileGenerator) GenerateMCP(p Params) (string, error) {
+	p.Profile = "mcp"
+	return g.Generate(p)
 }
 
 // GenerateDevAgent renders the dedicated dev-agent Seatbelt profile.

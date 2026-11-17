@@ -24,6 +24,9 @@ type SandboxOpts struct {
 	ConfigPath           string
 	Airgap               bool
 	AllowDirectNet       bool
+	AllowNetwork         string              // Specific allowlisted endpoint (host:port) for hermetic MCP wrapper
+	CacheDir             string              // Optional cache directory path (e.g. ~/.airlock/mcp-cache)
+	ExtraEnv             []string            // Custom environment variables (KEY=VALUE) injected into sandboxed process
 	AntiLoopback         bool
 	AllowedUnixSockets   []string
 	AllowedLoopbackPorts []int

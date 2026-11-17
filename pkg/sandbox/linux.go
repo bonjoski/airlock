@@ -182,6 +182,9 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 			strings.EqualFold(l.opts.Profile, "agent") ||
 			strings.EqualFold(l.opts.Profile, "dev-agent") ||
 			strings.EqualFold(l.opts.Profile, "dev_agent") ||
+			strings.EqualFold(l.opts.Profile, "mcp") ||
+			strings.EqualFold(l.opts.Profile, "mcp-wrap") ||
+			strings.EqualFold(l.opts.Profile, "mcp_wrap") ||
 			strings.EqualFold(l.opts.Profile, "mcp-gateway") ||
 			strings.EqualFold(l.opts.Profile, "mcp_gateway") ||
 			strings.EqualFold(l.opts.Profile, "strict-agent"))) {
@@ -297,6 +300,11 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 		args = append(args, "--dir", cleaned, "--ro-bind-try", cleaned, cleaned)
 	}
 
+	// Mount CacheDir if provided
+	if l.opts.CacheDir != "" {
+		args = append(args, "--dir", l.opts.CacheDir, "--ro-bind-try", l.opts.CacheDir, l.opts.CacheDir)
+	}
+
 	// Extra allowed write paths
 	for _, p := range l.opts.ExtraAllowWrite {
 		cleaned := strings.TrimSpace(p)
@@ -344,6 +352,8 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 
 	// Profile-specific sandbox hardening & capability dropping
 	switch {
+	case strings.EqualFold(l.opts.Profile, "mcp") || strings.EqualFold(l.opts.Profile, "mcp-wrap") || strings.EqualFold(l.opts.Profile, "mcp_wrap"):
+		args = profile.AugmentBwrapArgsForMCP(args, userHome, unreadableMask)
 	case strings.EqualFold(l.opts.Profile, "mcp-gateway") || strings.EqualFold(l.opts.Profile, "mcp_gateway"):
 		args = profile.AugmentBwrapArgsForMCPGateway(args, userHome, unreadableMask)
 	case strings.EqualFold(l.opts.Profile, "web-worker") || strings.EqualFold(l.opts.Profile, "web_worker"):
@@ -530,6 +540,27 @@ func (l *LinuxEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 			}
 			defer cleanup()
 			sanitizedEnv = append(sanitizedEnv, fmt.Sprintf("%s=%s", secretName, string(resp.SecretValue)))
+		}
+	}
+
+	// 7c. Injected Extra Environment Variables (e.g. MCP offline configuration)
+	for _, envVar := range l.opts.ExtraEnv {
+		if idx := strings.Index(envVar, "="); idx != -1 {
+			k := envVar[:idx]
+			prefix := k + "="
+			replaced := false
+			for i, existing := range sanitizedEnv {
+				if strings.HasPrefix(existing, prefix) {
+					sanitizedEnv[i] = envVar
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				sanitizedEnv = append(sanitizedEnv, envVar)
+			}
+		} else {
+			sanitizedEnv = append(sanitizedEnv, envVar)
 		}
 	}
 

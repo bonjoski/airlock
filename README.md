@@ -4,6 +4,7 @@
 > *Target Startup Overhead: <15ms (Measured: ~7.9ms) | Footprint: Zero-VM / Zero-Daemon | Platform: macOS, Linux & Windows*  
 
 [![CI](https://github.com/bonjoski/airlock/actions/workflows/ci.yml/badge.svg)](https://github.com/bonjoski/airlock/actions/workflows/ci.yml)
+[![SLSA 2](https://slsa.dev/images/gh-badge-level2.svg)](https://slsa.dev)
 [![Release](https://img.shields.io/github/v/release/bonjoski/airlock?color=blue)](https://github.com/bonjoski/airlock/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Sigstore Cosign](https://img.shields.io/badge/Signed_with-Sigstore_Cosign-blueviolet.svg)](https://docs.sigstore.dev)
@@ -428,17 +429,27 @@ Every CI build executes an automated suite of adversarial attack simulations val
 
 ---
 
-## 🔏 Cryptographic Provenance (Sigstore Cosign)
+## 🔏 Cryptographic Provenance (Sigstore Cosign & SLSA v1.0)
 
-Every official Airlock release artifact is cryptographically signed using **Sigstore Cosign Keyless OIDC**. Verification is logged publicly in the Rekor transparency log.
+Every official Airlock release artifact includes cryptographic **SLSA v1.0 Build Provenance** and is signed using **Sigstore Cosign Keyless OIDC**. Verification is logged publicly in the Sigstore Rekor transparency log.
 
-To manually verify the provenance of any release:
+### 1. Verify SLSA Provenance (GitHub)
+```bash
+gh attestation verify airlock_v0.11.0_darwin_arm64.tar.gz --repo bonjoski/airlock
+```
+
+### 2. Verify Cosign Signature
 ```bash
 cosign verify-blob \
   --bundle checksums.txt.bundle \
   --certificate-identity-regexp "^https://github.com/bonjoski/airlock/" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   checksums.txt
+```
+
+### 3. Verify Offline with Soulcaster
+```bash
+soulcaster verify --attestation airlock.intoto.jsonl bin/airlock
 ```
 
 ---
