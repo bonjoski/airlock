@@ -250,12 +250,14 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 
 	// Workspace Secret Masking (V-04: Read Denial via 0000 unreadable file or /dev/null)
 	unreadableMask := filepath.Join(sc.Root(), ".airlock_secret_mask")
+	unreadableDirMask := filepath.Join(sc.Root(), ".airlock_dir_mask")
 	if err := os.WriteFile(unreadableMask, []byte{}, 0000); err == nil {
 		secrets, _ := FindWorkspaceSecrets(l.opts.WorkspaceRoot)
 		for _, secretPath := range secrets {
 			args = append(args, "--ro-bind", unreadableMask, secretPath)
 		}
 	}
+	_ = os.MkdirAll(unreadableDirMask, 0000)
 
 	// Read-Only Host Package Caches (V-12: Prevents Cold Cache Penalty)
 	if l.cacheMgr != nil && userHome != "" {
@@ -365,7 +367,7 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 	case strings.EqualFold(l.opts.Profile, "dev-agent") || strings.EqualFold(l.opts.Profile, "dev_agent"):
 		args = append(args,
 			"--cap-drop", "ALL",
-			"--ro-bind-try", unreadableMask, "/proc/sys",
+			"--ro-bind-try", unreadableDirMask, "/proc/sys",
 			"--ro-bind-try", unreadableMask, "/proc/kcore",
 		)
 	}
