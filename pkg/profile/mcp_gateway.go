@@ -69,7 +69,7 @@ func AugmentBwrapArgsForMCPGateway(args []string, userHome string, unreadableMas
 
 	if unreadableMask != "" {
 		args = append(args,
-			"--ro-bind-try", unreadableMask, "/proc/sys",
+			"--tmpfs", "/proc/sys",
 			"--ro-bind-try", unreadableMask, "/proc/kcore",
 		)
 

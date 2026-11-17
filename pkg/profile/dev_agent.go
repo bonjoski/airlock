@@ -59,7 +59,7 @@ func AugmentBwrapArgsForDevAgent(args []string, userHome string, unreadableMask 
 	// Mask /proc/sys and /proc/kcore if unreadableMask is provided
 	if unreadableMask != "" {
 		args = append(args,
-			"--ro-bind-try", unreadableMask, "/proc/sys",
+			"--tmpfs", "/proc/sys",
 			"--ro-bind-try", unreadableMask, "/proc/kcore",
 		)
 

@@ -54,7 +54,7 @@ func AugmentBwrapArgsForMCP(args []string, userHome string, unreadableMask strin
 
 	if unreadableMask != "" {
 		args = append(args,
-			"--ro-bind-try", unreadableMask, "/proc/sys",
+			"--tmpfs", "/proc/sys",
 			"--ro-bind-try", unreadableMask, "/proc/kcore",
 		)
 
