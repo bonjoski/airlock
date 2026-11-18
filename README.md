@@ -197,6 +197,22 @@ airlock run --allow-domain api.mycorp.internal -- npm install
 
 ---
 
+## 💡 Core Use Cases & Recipes
+
+Every primary developer use case is documented with copy-pasteable commands and verification steps in [**`docs/use-cases/`**](docs/use-cases/README.md):
+
+| Use Case | Scenario & Quick Recipe | Full Guide |
+| :--- | :--- | :--- |
+| **Fast Linter & Formatter Confinement** | Run linters with sub-15ms overhead and zero network egress:<br/>`airlock run --profile linter -- gofmt -w .` | [Guide](docs/use-cases/01-fast-linter-sandboxing.md) |
+| **Sandboxed Package Managers** | Isolate package installs and prevent credential theft from postinstall scripts:<br/>`airlock run --profile node -- npm install` | [Guide](docs/use-cases/02-sandboxed-package-managers.md) |
+| **Pre-Flight Command Vetting** | Inspect dependencies and required permissions before executing:<br/>`airlock vet -- npm install lodash` | [Guide](docs/use-cases/03-preflight-policy-vetting.md) |
+| **Strict No-Network Code Exploration** | Enable autonomous agents to explore code while blocking exfiltration:<br/>`airlock run --profile offline-reader -- rg "TODO" src/` | [Guide](docs/use-cases/04-offline-code-exploration.md) |
+| **Custom Declarative Sandbox Profiles** | Compile custom cross-platform Seatbelt/Landlock YAML profiles:<br/>`airlock profile create corporate-build --template standard-dev` | [Guide](docs/use-cases/05-custom-sandbox-profiles.md) |
+
+---
+
+---
+
 ## 🤖 AI Assistant & IDE Integration (Model Context Protocol)
 
 Airlock includes a dedicated, high-performance **Model Context Protocol (MCP)** server (`airlock-mcp` or `airlock mcp`) providing autonomous AI coding agents with zero-trust execution, pre-execution threat vetting, and security policy introspection.
