@@ -343,10 +343,10 @@ func TestLinuxEngine_BuildBwrapArgs_MCPGateway(t *testing.T) {
 	if !strings.Contains(argsStr, "/proc/sys") {
 		t.Errorf("mcp-gateway bwrap args missing /proc/sys masking: %s", argsStr)
 	}
-	if !strings.Contains(argsStr, filepath.Join(mockHome, ".azure")) {
+	if !strings.Contains(argsStr, filepath.Join(mockHome, ".azure")) && !strings.Contains(argsStr, filepath.ToSlash(filepath.Join(mockHome, ".azure"))) {
 		t.Errorf("mcp-gateway bwrap args missing ~/.azure masking: %s", argsStr)
 	}
-	if !strings.Contains(argsStr, filepath.Join(mockHome, ".ssh")) {
+	if !strings.Contains(argsStr, filepath.Join(mockHome, ".ssh")) && !strings.Contains(argsStr, filepath.ToSlash(filepath.Join(mockHome, ".ssh"))) {
 		t.Errorf("mcp-gateway bwrap args missing ~/.ssh masking: %s", argsStr)
 	}
 	if !strings.Contains(argsStr, "--unshare-net") {

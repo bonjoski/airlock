@@ -30,9 +30,14 @@ func SafePinPathFD(path string, denyPaths []string, workspaceRoot string) (int, 
 	fd, err := unix.Open(cleanPath, flags, 0)
 	if err != nil {
 		if errors.Is(err, unix.ENOTDIR) {
-			// Not a directory: try regular file/socket with O_NOFOLLOW
-			flags = oPath | syscall.O_CLOEXEC | unix.O_NOFOLLOW
-			fd, err = unix.Open(cleanPath, flags, 0)
+			// Check if cleanPath is a symlink
+			if fi, lerr := os.Lstat(cleanPath); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+				err = unix.ELOOP
+			} else {
+				// Not a directory: try regular file/socket with O_NOFOLLOW
+				flags = oPath | syscall.O_CLOEXEC | unix.O_NOFOLLOW
+				fd, err = unix.Open(cleanPath, flags, 0)
+			}
 		}
 	}
 

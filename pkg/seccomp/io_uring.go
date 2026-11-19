@@ -27,7 +27,7 @@ const (
 	IORING_REGISTER_FILES_UPDATE  uint32 = 6
 	IORING_REGISTER_EVENTFD_ASYNC uint32 = 7
 	IORING_REGISTER_PROBE         uint32 = 8
-	IORING_REGISTER_PERSONALITY   uint32 = 9  // BANNED: Personality registration elevation
+	IORING_REGISTER_PERSONALITY   uint32 = 9 // BANNED: Personality registration elevation
 	IORING_UNREGISTER_PERSONALITY uint32 = 10
 	IORING_REGISTER_RESTRICTIONS  uint32 = 11
 	IORING_REGISTER_ENABLE_RINGS  uint32 = 12
@@ -35,9 +35,9 @@ const (
 
 // Linux io_uring_restriction opcodes (<linux/io_uring.h>).
 const (
-	IORING_RESTRICTION_REGISTER_OP       uint16 = 0
-	IORING_RESTRICTION_SQE_OP            uint16 = 1
-	IORING_RESTRICTION_SQE_FLAGS_ALLOWED uint16 = 2
+	IORING_RESTRICTION_REGISTER_OP        uint16 = 0
+	IORING_RESTRICTION_SQE_OP             uint16 = 1
+	IORING_RESTRICTION_SQE_FLAGS_ALLOWED  uint16 = 2
 	IORING_RESTRICTION_SQE_FLAGS_REQUIRED uint16 = 3
 )
 
@@ -104,10 +104,10 @@ const (
 // IoUringRestriction mirrors the 16-byte Linux kernel `struct io_uring_restriction`
 // used with io_uring_register(fd, IORING_REGISTER_RESTRICTIONS, ptr, count).
 type IoUringRestriction struct {
-	Opcode   uint16    // IORING_RESTRICTION_*
-	SubOp    uint8     // register_op, sqe_op, or sqe_flags
-	Resv     uint8     // Reserved padding
-	Resv2    [3]uint32 // Reserved padding
+	Opcode uint16    // IORING_RESTRICTION_*
+	SubOp  uint8     // register_op, sqe_op, or sqe_flags
+	Resv   uint8     // Reserved padding
+	Resv2  [3]uint32 // Reserved padding
 }
 
 // Bytes serializes the 16-byte restriction into little-endian binary format.
