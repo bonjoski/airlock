@@ -47,9 +47,28 @@ const (
 	AccessFSRead  = AccessFSExecute | AccessFSReadFile | AccessFSReadDir
 	AccessFSWrite = AccessFSWriteFile | AccessFSRemoveDir | AccessFSRemoveFile |
 		AccessFSMakeChar | AccessFSMakeDir | AccessFSMakeReg | AccessFSMakeSock |
-		AccessFSMakeFifo | AccessFSMakeBlock | AccessFSMakeSym | AccessFSRefer | AccessFSTruncate
+		AccessFSMakeFifo | AccessFSMakeBlock | AccessFSMakeSym | AccessFSRefer | AccessFSTruncate | AccessFSIoctlDev
 	AccessFSAll = AccessFSRead | AccessFSWrite
 )
+
+// MaskSupportedAccessFS returns the handled access flags supported by the given Landlock ABI version.
+// On ABI v1-v4 kernels, flags introduced in later versions (e.g. AccessFSIoctlDev in v5) are masked out
+// to avoid ruleset creation failure with -EINVAL while enabling full protection on ABI v5+ kernels.
+func MaskSupportedAccessFS(handled uint64, abiVersion int) uint64 {
+	if abiVersion <= 0 {
+		return 0
+	}
+	switch abiVersion {
+	case 1:
+		return handled & ((1 << 13) - 1) &^ AccessFSRefer
+	case 2:
+		return handled & ((1 << 14) - 1)
+	case 3, 4:
+		return handled & ((1 << 15) - 1)
+	default: // ABI >= 5
+		return handled
+	}
+}
 
 var (
 	// ErrLandlockNotSupported indicates that the running kernel does not support Landlock.

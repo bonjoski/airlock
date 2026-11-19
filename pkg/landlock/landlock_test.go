@@ -258,3 +258,55 @@ func TestApply_NonLinuxReturnsError(t *testing.T) {
 		t.Fatal("Expected error on non-Linux platform, got nil")
 	}
 }
+
+func TestMaskSupportedAccessFS(t *testing.T) {
+	allFlags := uint64(AccessFSAll)
+
+	// ABI 1: No AccessFSRefer (1<<13), no AccessFSTruncate (1<<14), no AccessFSIoctlDev (1<<15)
+	v1 := MaskSupportedAccessFS(allFlags, 1)
+	if v1&AccessFSRefer != 0 {
+		t.Errorf("ABI v1 must not contain AccessFSRefer")
+	}
+	if v1&AccessFSTruncate != 0 {
+		t.Errorf("ABI v1 must not contain AccessFSTruncate")
+	}
+	if v1&AccessFSIoctlDev != 0 {
+		t.Errorf("ABI v1 must not contain AccessFSIoctlDev")
+	}
+
+	// ABI 2: Contains AccessFSRefer, but no AccessFSTruncate, no AccessFSIoctlDev
+	v2 := MaskSupportedAccessFS(allFlags, 2)
+	if v2&AccessFSRefer == 0 {
+		t.Errorf("ABI v2 should contain AccessFSRefer")
+	}
+	if v2&AccessFSTruncate != 0 {
+		t.Errorf("ABI v2 must not contain AccessFSTruncate")
+	}
+	if v2&AccessFSIoctlDev != 0 {
+		t.Errorf("ABI v2 must not contain AccessFSIoctlDev")
+	}
+
+	// ABI 3/4: Contains AccessFSTruncate, but no AccessFSIoctlDev
+	v3 := MaskSupportedAccessFS(allFlags, 3)
+	if v3&AccessFSTruncate == 0 {
+		t.Errorf("ABI v3 should contain AccessFSTruncate")
+	}
+	if v3&AccessFSIoctlDev != 0 {
+		t.Errorf("ABI v3 must not contain AccessFSIoctlDev")
+	}
+
+	// ABI 5+: Contains all flags including AccessFSIoctlDev
+	v5 := MaskSupportedAccessFS(allFlags, 5)
+	if v5&AccessFSIoctlDev == 0 {
+		t.Errorf("ABI v5 should contain AccessFSIoctlDev")
+	}
+	if v5 != allFlags {
+		t.Errorf("ABI v5 should match allFlags (%x != %x)", v5, allFlags)
+	}
+
+	// Unsupported ABI (<=0)
+	v0 := MaskSupportedAccessFS(allFlags, 0)
+	if v0 != 0 {
+		t.Errorf("ABI 0 should return 0, got %x", v0)
+	}
+}

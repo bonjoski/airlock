@@ -11,9 +11,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// IsSupported checks if the host kernel supports Landlock LSM.
-func IsSupported() bool {
-	// landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION) returns abi version >= 1
+// GetABIVersion returns the Landlock ABI version supported by the kernel, or 0 if unsupported.
+func GetABIVersion() int {
 	r1, _, err := syscall.Syscall(
 		SysLandlockCreateRuleset,
 		0,
@@ -21,15 +20,25 @@ func IsSupported() bool {
 		uintptr(CreateRulesetVersion),
 	)
 	if err != 0 && !errors.Is(err, syscall.Errno(0)) {
-		return false
+		return 0
 	}
-	return int(r1) >= 1
+	return int(r1)
+}
+
+// IsSupported checks if the host kernel supports Landlock LSM.
+func IsSupported() bool {
+	return GetABIVersion() >= 1
 }
 
 // Apply restricts the current process using the synthesized Landlock ruleset.
 func Apply(rs *Ruleset) error {
 	if rs == nil || rs.HandledAccessFS == 0 {
 		return errors.New("landlock: empty ruleset")
+	}
+
+	abi := GetABIVersion()
+	if abi <= 0 {
+		return ErrLandlockNotSupported
 	}
 
 	// 1. Enforce PR_SET_NO_NEW_PRIVS (required before restrict_self)
@@ -47,9 +56,9 @@ func Apply(rs *Ruleset) error {
 		return fmt.Errorf("landlock: failed to set PR_SET_NO_NEW_PRIVS: %w", err)
 	}
 
-	// 2. Create ruleset
+	// 2. Create ruleset with flags safely masked to the kernel's supported ABI level
 	attr := RulesetAttr{
-		HandledAccessFS: rs.HandledAccessFS,
+		HandledAccessFS: MaskSupportedAccessFS(rs.HandledAccessFS, abi),
 	}
 	rulesetFD, _, err := syscall.Syscall(
 		SysLandlockCreateRuleset,

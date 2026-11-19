@@ -7,6 +7,11 @@ import (
 	"runtime"
 )
 
+// GetABIVersion returns 0 on non-Linux platforms.
+func GetABIVersion() int {
+	return 0
+}
+
 // IsSupported checks if the host kernel supports Landlock LSM.
 func IsSupported() bool {
 	return false
