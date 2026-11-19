@@ -78,6 +78,8 @@ type Ruleset struct {
 	HandledAccessFS uint64
 	Rules           []PathRule
 	DenyPaths       []string
+	WorkspaceRoot   string
+	ScratchDir      string
 }
 
 // Config specifies input directories for synthesizing a Landlock ruleset.
@@ -111,6 +113,8 @@ func BuildDevAgentRuleset(cfg Config) *Ruleset {
 	rs := &Ruleset{
 		HandledAccessFS: AccessFSAll,
 		DenyPaths:       append([]string(nil), DevAgentDefaultDenyPaths...),
+		WorkspaceRoot:   cfg.WorkspaceRoot,
+		ScratchDir:      cfg.ScratchDir,
 	}
 
 	// 1. System toolchains and runtime paths (Read-Only)

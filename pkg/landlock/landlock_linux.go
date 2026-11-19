@@ -5,9 +5,10 @@ package landlock
 import (
 	"errors"
 	"fmt"
-	"os"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 // IsSupported checks if the host kernel supports Landlock LSM.
@@ -61,18 +62,16 @@ func Apply(rs *Ruleset) error {
 	}
 	defer syscall.Close(int(rulesetFD))
 
-	// 3. Populate path rules
+	// 3. Populate path rules using pinned file descriptors (O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
 	for _, rule := range rs.Rules {
-		if _, statErr := os.Stat(rule.Path); statErr != nil {
-			// Path does not exist on host; safely skip
-			continue
-		}
-
-		// Open target directory/file with O_PATH | O_CLOEXEC
-		const oPath = 0x200000
-		fd, openErr := syscall.Open(rule.Path, oPath|syscall.O_CLOEXEC, 0)
-		if openErr != nil {
-			continue
+		fd, err := SafePinPathFD(rule.Path, rs.DenyPaths, rs.WorkspaceRoot)
+		if err != nil {
+			if errors.Is(err, unix.ENOENT) {
+				// Path does not exist on host; safely skip (e.g. optional toolchains)
+				continue
+			}
+			// Security-critical: symlink replacement attacks or deny path violations fail closed
+			return fmt.Errorf("landlock: failed to safely pin rule path %s: %w", rule.Path, err)
 		}
 
 		pbAttr := PathBeneathAttr{
@@ -86,7 +85,7 @@ func Apply(rs *Ruleset) error {
 			uintptr(RuleTypePathBeneath),
 			uintptr(unsafe.Pointer(&pbAttr)),
 		)
-		_ = syscall.Close(fd)
+		_ = unix.Close(fd)
 
 		if addErr != 0 {
 			return fmt.Errorf("landlock: failed to add rule for %s: %w", rule.Path, addErr)

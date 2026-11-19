@@ -4,13 +4,17 @@ package tests
 
 import (
 	"context"
+	"errors"
 	"os"
+	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/bonjoski/airlock/pkg/bridge"
 	"github.com/bonjoski/airlock/pkg/config"
 	"github.com/bonjoski/airlock/pkg/env"
+	"github.com/bonjoski/airlock/pkg/landlock"
 	"github.com/bonjoski/airlock/pkg/pty"
 	"github.com/bonjoski/airlock/pkg/sandbox"
 )
@@ -206,4 +210,51 @@ func TestAdversarial_WebWorkerProfileProtection(t *testing.T) {
 		}
 	}
 	t.Log("PASS: web-worker profile strictly denies execution access to shell interpreters")
+}
+
+// ADV-P3-09: Landlock Path Resolution TOCTOU Symlink Traversal Hardening (THREAT-2026-ADV-02)
+// Verifies that Landlock path resolution pins directory file descriptors safely and guards
+// against concurrent worker symlink replacement attacks during rapid workspace setup.
+func TestAdversarial_LandlockPathResolution_SymlinkRaceFailsClosed(t *testing.T) {
+	wsDir := t.TempDir()
+	victimTarget := filepath.Join(wsDir, "untrusted_link")
+	sensitiveHostDir := filepath.Join(wsDir, "host_secrets")
+	if err := os.MkdirAll(sensitiveHostDir, 0700); err != nil {
+		t.Fatalf("mkdir host_secrets failed: %v", err)
+	}
+
+	// Create symlink pointing from inside workspace to sensitive host directory
+	if err := os.Symlink(sensitiveHostDir, victimTarget); err != nil {
+		t.Fatalf("symlink creation failed: %v", err)
+	}
+
+	denyPaths := []string{sensitiveHostDir, "~/.ssh", "~/.aws"}
+
+	// 1. Path resolution must fail closed when encountering symlink to denied path
+	fd, err := landlock.SafePinPathFD(victimTarget, denyPaths, wsDir)
+	if err == nil {
+		_ = syscall.Close(fd)
+		t.Fatalf("CRITICAL SECURITY VULNERABILITY: Landlock pinned file descriptor to denied directory %s!", sensitiveHostDir)
+	}
+	if !errors.Is(err, landlock.ErrDeniedPathTarget) && !errors.Is(err, landlock.ErrSymlinkTraversal) {
+		t.Fatalf("Expected ErrDeniedPathTarget or ErrSymlinkTraversal, got: %v", err)
+	}
+
+	// 2. Path resolution must verify that workspace paths cannot escape workspace root via symlink
+	outsideDir := t.TempDir()
+	escapeLink := filepath.Join(wsDir, "escape_link")
+	if err := os.Symlink(outsideDir, escapeLink); err != nil {
+		t.Fatalf("symlink escape creation failed: %v", err)
+	}
+
+	fd, err = landlock.SafePinPathFD(escapeLink, nil, wsDir)
+	if err == nil {
+		_ = syscall.Close(fd)
+		t.Fatalf("CRITICAL SECURITY VULNERABILITY: Landlock allowed workspace escape symlink to %s!", outsideDir)
+	}
+	if !errors.Is(err, landlock.ErrSymlinkTraversal) {
+		t.Fatalf("Expected ErrSymlinkTraversal for workspace escape link, got: %v", err)
+	}
+
+	t.Log("PASS: Landlock path resolution strictly failed closed against symlink traversal attacks")
 }
