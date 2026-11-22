@@ -18,12 +18,12 @@ import (
 )
 
 // TestOpaqueLease_InjectAndScrubStdout verifies FR-LEASE-03 / ADV-LEASE-01:
-// 1. Redeems an opaque lease handle over a mock Locksmith UDS server.
-// 2. Injects the secret into the sandboxed child process environment.
-// 3. If the child prints the canary secret (sk-live-CANARY999) to stdout or stderr,
-//    Airlock scrubs it completely and fails closed with UB-MCP-v1 FixForwardError
-//    (code: "AIRLOCK_SECRET_LEAK_BLOCKED", exit_code: 40) with ZERO canary bytes returned.
-// 4. Cross-session lease hijack is denied fail-closed (exit_code: 40).
+//  1. Redeems an opaque lease handle over a mock Locksmith UDS server.
+//  2. Injects the secret into the sandboxed child process environment.
+//  3. If the child prints the canary secret (sk-live-CANARY999) to stdout or stderr,
+//     Airlock scrubs it completely and fails closed with UB-MCP-v1 FixForwardError
+//     (code: "AIRLOCK_SECRET_LEAK_BLOCKED", exit_code: 40) with ZERO canary bytes returned.
+//  4. Cross-session lease hijack is denied fail-closed (exit_code: 40).
 func TestOpaqueLease_InjectAndScrubStdout(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix domain sockets not supported on Windows in this test")

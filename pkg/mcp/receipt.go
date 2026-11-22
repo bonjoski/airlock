@@ -261,7 +261,7 @@ func EmitReceipt(ctx context.Context, params ReceiptParams) (string, string, err
 	headSHA := resolveWorktreeHeadSHA(params.WorkspaceRoot)
 	ver := strings.TrimSpace(version.Version)
 	if ver == "" {
-		ver = "0.12.0"
+		ver = "0.12.1"
 	}
 
 	buildStatement := func(proven bool, sigMode string) ([]byte, error) {
