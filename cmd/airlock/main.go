@@ -18,6 +18,7 @@ import (
 	"github.com/bonjoski/airlock/pkg/redact"
 	"github.com/bonjoski/airlock/pkg/sandbox"
 	"github.com/bonjoski/airlock/pkg/shim"
+	"github.com/bonjoski/airlock/pkg/ux"
 	"github.com/bonjoski/airlock/pkg/version"
 )
 
@@ -64,6 +65,8 @@ func main() {
 	case "profile", "profiles":
 		handleProfile(os.Args[2:])
 		os.Exit(0)
+	case "explain":
+		os.Exit(runExplain(os.Args[2:], os.Stdout, os.Stderr))
 	case "run", "exec":
 		handleRun(os.Args[2:])
 	default:
@@ -93,11 +96,14 @@ Usage:
   airlock doctor [--json] [--ai] [--workspace <path>] [--fix]
   airlock audit [list|tail|stats|export] [flags]
   airlock profile [list]
+  airlock explain [sandbox|shims|seatbelt|landlock|ssh|worktree] [--why] [--json]
   airlock mcp
   airlock mcp wrap [--lockfile <path>] [--cache-dir <dir>] [--allow-network <host:port>] -- <command> [args...]
   airlock version
 
 Flags:
+  --why                 Progressive disclosure: expand confinement rationale and references on errors
+  --json                Emit structured UB-CLI-v2 FixForwardError JSON on confinement/CLI errors
   --profile <name>      Execution profile (standard, agent, dev-agent, mcp-gateway, web-worker, strict, airgap, default)
   --microvm             Tier 2 Confinement via Aegisbox hypervisor MicroVM
   --lease-secret <keys> Comma-separated secrets to lease dynamically via Locksmith
@@ -214,6 +220,8 @@ func handleRun(args []string) {
 		leaseSecrets   string
 		sessionTicket  string
 		debug          bool
+		showWhy        bool
+		asJSON         bool
 	)
 
 	fs.StringVar(&configPath, "config", "", "Path to declarative policy file")
@@ -222,6 +230,8 @@ func handleRun(args []string) {
 	fs.StringVar(&leaseSecrets, "lease-secret", "", "Comma-separated secrets to lease via Locksmith")
 	fs.StringVar(&sessionTicket, "session-ticket", "", "Session ticket for batch agent sub-commands")
 	fs.BoolVar(&debug, "debug", false, "Enable verbose diagnostics (e.g. ELF pre-pass)")
+	fs.BoolVar(&showWhy, "why", false, "Progressive disclosure of sandbox confinement details on errors")
+	fs.BoolVar(&asJSON, "json", false, "Emit structured UB-CLI-v2 FixForwardError JSON on errors")
 	fs.BoolVar(&airgap, "airgap", false, "Offline isolation")
 	fs.BoolVar(&allowDirectNet, "net", false, "Permit direct external network")
 	fs.StringVar(&allowDomains, "allow-domain", "", "Additional registry domains")
@@ -268,7 +278,16 @@ func handleRun(args []string) {
 	_ = fs.Parse(flagArgs)
 
 	if len(cmdArgs) == 0 {
-		fmt.Fprintln(os.Stderr, "airlock: no command specified for execution")
+		ffe := &ux.FixForwardError{
+			Tool:           "airlock",
+			Code:           "AIRLOCK_MISSING_COMMAND",
+			Summary:        "No command specified for sandboxed execution",
+			RemediationCmd: "airlock run -- npm test",
+			WhyOneLiner:    "Pass the command to confine after `--` or directly after `airlock`.",
+			DeepWhy:        "Airlock wraps any package manager, test runner, or coding agent inside sub-15ms kernel confinement without requiring YAML configuration.",
+			ExitCode:       1,
+		}
+		_ = ffe.Render(os.Stderr, asJSON, showWhy)
 		os.Exit(1)
 	}
 
@@ -494,7 +513,13 @@ func handleRun(args []string) {
 	})
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "airlock: execution failed: %v\n", err)
+		if asJSON || showWhy || strings.Contains(strings.ToLower(err.Error()), "permission denied") || strings.Contains(strings.ToLower(err.Error()), "operation not permitted") {
+			ffe := ux.FormatSandboxDenial(cmdArgs[0], resolvedWorkspace, err.Error())
+			ffe.ExitCode = exitCode
+			_ = ffe.Render(os.Stderr, asJSON, showWhy)
+		} else {
+			fmt.Fprintf(os.Stderr, "airlock: execution failed: %v\n", err)
+		}
 		os.Exit(exitCode)
 	}
 

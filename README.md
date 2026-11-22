@@ -208,6 +208,24 @@ Every primary developer use case is documented with copy-pasteable commands and 
 | **Pre-Flight Command Vetting** | Inspect dependencies and required permissions before executing:<br/>`airlock vet -- npm install lodash` | [Guide](docs/use-cases/03-preflight-policy-vetting.md) |
 | **Strict No-Network Code Exploration** | Enable autonomous agents to explore code while blocking exfiltration:<br/>`airlock run --profile offline-reader -- rg "TODO" src/` | [Guide](docs/use-cases/04-offline-code-exploration.md) |
 | **Custom Declarative Sandbox Profiles** | Compile custom cross-platform Seatbelt/Landlock YAML profiles:<br/>`airlock profile create corporate-build --template standard-dev` | [Guide](docs/use-cases/05-custom-sandbox-profiles.md) |
+| **Calm Confinement Explanations (`--why`)** | Inspect why a host credential or worktree path was blocked with progressive disclosure:<br/>`airlock explain ssh --why` | [CLI Contract](#calm-sandbox-denials--progressive-disclosure---why) |
+
+### Calm Sandbox Denials & Progressive Disclosure (`--why`)
+
+When a confined script or AI agent hits a kernel boundary (such as reading `~/.ssh/id_rsa`), Airlock emits a calm ≤3-line UB-CLI-v2 Fix-Forward message instead of a cryptic `EPERM` traceback, and unlocks full OS confinement details via `--why` or `airlock explain`:
+
+```bash
+# Default calm output (<= 3 lines)
+⚠ airlock: Airlock blocked read to ~/.ssh/id_rsa
+  Fix:  airlock explain ssh --why
+  Why:  Airlock prevented npm from accessing paths outside your workspace boundary. (re-run with --why or `airlock explain airlock_sandbox_denied` for details)
+
+# Progressive disclosure (--why) or structured agent mode (--json)
+airlock explain ssh --why
+airlock explain sandbox --json
+```
+
+Available `airlock explain` topics: `sandbox`, `shims`, `seatbelt`, `landlock`, `ssh`, `worktree`.
 
 ---
 
