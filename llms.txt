@@ -19,3 +19,8 @@
 - Audit Log: `~/.airlock/audit.log`
 - Configuration: `airlock.yaml`
 - Documentation: README.md & AGENTS.md
+
+
+## Paved-Road Integration (`2026-11-22`: `UB-CLI-v2`, Opaque Leases & `BLPR-v1`)
+- Progressive disclosure: `airlock explain [topic] [--json]` & calm ≤3-line `FixForwardError` (`exit_code: 30` on sandbox denial)
+- MCP (`UB-MCP-v1`): `airlock_exec` accepts `secret_leases[]`, `session_id`, `emit_receipt`; redeems opaque leases over `LOCKSMITH_SOCKET`, scrubs leaked secrets fail-closed (`exit_code: 40`), and emits signed `BLPR-v1` receipts under `FABRIAL_RECEIPT_DIR`.

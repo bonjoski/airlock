@@ -210,10 +210,15 @@ func (s *Server) processRequest(ctx context.Context, req *Request) (*Response, e
 			return &Response{
 				JSONRPC: "2.0",
 				ID:      req.ID,
-				Result: &CallToolResult{
-					Content: []ContentItem{{Type: "text", Text: fmt.Sprintf("tool error: %v", callErr)}},
-					IsError: true,
-				},
+				Result: NewUBMCPErrorResult(&UBMCPError{
+					Code:           "AIRLOCK_TOOL_ERROR",
+					ExitCode:       ExitRuntimeErr,
+					Retryable:      true,
+					Summary:        fmt.Sprintf("Tool '%s' failed: %v", params.Name, callErr),
+					RemediationCmd: "airlock doctor",
+					Why:            "Verify the MCP tool arguments and local sandbox environment before retrying.",
+					References:     []string{"https://github.com/bonjoski/airlock/blob/main/README.md"},
+				}),
 			}, nil
 		}
 

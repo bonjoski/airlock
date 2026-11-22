@@ -209,6 +209,26 @@ Every primary developer use case is documented with copy-pasteable commands and 
 | **Strict No-Network Code Exploration** | Enable autonomous agents to explore code while blocking exfiltration:<br/>`airlock run --profile offline-reader -- rg "TODO" src/` | [Guide](docs/use-cases/04-offline-code-exploration.md) |
 | **Custom Declarative Sandbox Profiles** | Compile custom cross-platform Seatbelt/Landlock YAML profiles:<br/>`airlock profile create corporate-build --template standard-dev` | [Guide](docs/use-cases/05-custom-sandbox-profiles.md) |
 | **Calm Confinement Explanations (`--why`)** | Inspect why a host credential or worktree path was blocked with progressive disclosure:<br/>`airlock explain ssh --why` | [CLI Contract](#calm-sandbox-denials--progressive-disclosure---why) |
+| **Zero-Secret Opaque Leases & `BLPR-v1` Receipts (MCP)** | Redeem Locksmith opaque `secret_leases` inside `airlock_exec`, fail closed (`exit_code: 40`) on stdout leaks, and emit signed `BLPR-v1` DSSE receipts | [Recipe](#opaque-secret-leases--blpr-v1-provenance-receipts-ub-mcp-v1) |
+
+### Opaque Secret Leases & `BLPR-v1` Provenance Receipts (`UB-MCP-v1`)
+
+Autonomous AI coding agents can pass opaque Locksmith lease handles (`secret_leases`) into `airlock_exec` so raw credentials are redeemed directly over `LOCKSMITH_SOCKET`, zeroed in memory after execution, and **never enter the LLM context window**. If a sandboxed child attempts to echo a leased secret to stdout/stderr, Airlock scrubs the output completely and fails closed with a `UB-MCP-v1` `FixForwardError` (`code: "AIRLOCK_SECRET_LEAK_BLOCKED"`, `exit_code: 40`).
+
+```json
+{
+  "name": "airlock_exec",
+  "arguments": {
+    "command": "go test ./billing/...",
+    "workspace": "/path/to/repo",
+    "secret_leases": ["lease_01JDX9N8Z..."],
+    "session_id": "sess_01JDX9J00...",
+    "emit_receipt": true
+  }
+}
+```
+
+When `FABRIAL_RECEIPT_DIR` is active, `airlock_exec` and `airlock_vet` atomically write signed `BLPR-v1` DSSE / in-toto Statement v1 receipts (`0600`, `os.OpenRoot` + `O_NOFOLLOW`, rejecting symlinked receipt directories fail-closed with `exit_code: 10`) using Locksmith's amortized session Ed25519 key (`sign_dsse`).
 
 ### Calm Sandbox Denials & Progressive Disclosure (`--why`)
 

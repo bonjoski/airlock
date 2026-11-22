@@ -1025,6 +1025,28 @@ func TestSEC26_MCPSandboxConfinement(t *testing.T) {
 		t.Fatalf("SEC-26 FAILED: Invalid tool result payload")
 	}
 
+	if runtime.GOOS == "windows" {
+		// Windows Job Object engine confines process lifecycle and env; filesystem sandboxing is macOS Seatbelt & Linux bwrap.
+		return
+	}
+
+	if toolRes.StructuredContent != nil {
+		scBytes, _ := json.Marshal(toolRes.StructuredContent)
+		var ubErr mcp.UBMCPError
+		if err := json.Unmarshal(scBytes, &ubErr); err == nil {
+			if strings.Contains(ubErr.DeepWhy, "unprivileged user namespaces are disabled") || strings.Contains(ubErr.DeepWhy, "bwrap") {
+				t.Skip("bwrap not found or unprivileged userns disabled; skipping sandbox execution on host")
+			}
+			if !toolRes.IsError || ubErr.ExitCode == 0 {
+				t.Fatalf("SEC-26 FAILED: Critical security invariant violated: MCP execution bypassed ~/.ssh sandbox confinement!")
+			}
+			if ubErr.ExitCode != mcp.ExitSandboxViolation {
+				t.Errorf("SEC-26: Expected UB-MCP-v1 exit_code %d for sandbox denial, got %d", mcp.ExitSandboxViolation, ubErr.ExitCode)
+			}
+			return
+		}
+	}
+
 	var execRes mcp.ExecResult
 	if err := json.Unmarshal([]byte(toolRes.Content[0].Text), &execRes); err != nil {
 		t.Fatalf("SEC-26 FAILED: Failed to parse ExecResult: %v", err)
@@ -1032,11 +1054,6 @@ func TestSEC26_MCPSandboxConfinement(t *testing.T) {
 
 	if execRes.ExitCode != 0 && (strings.Contains(execRes.Error, "unprivileged user namespaces are disabled") || strings.Contains(execRes.Error, "bwrap")) {
 		t.Skip("bwrap not found or unprivileged userns disabled; skipping sandbox execution on host")
-	}
-
-	if runtime.GOOS == "windows" {
-		// Windows Job Object engine confines process lifecycle and env; filesystem sandboxing is macOS Seatbelt & Linux bwrap.
-		return
 	}
 
 	if execRes.ExitCode == 0 {

@@ -205,16 +205,22 @@ end
 			t.Fatalf("SEC-31 FAILED: Expected airlock_vet to return IsError=true for malicious Ruby gemspec")
 		}
 
-		var vetRes mcp.VetResult
-		if err := json.Unmarshal([]byte(toolRes.Content[0].Text), &vetRes); err != nil {
-			t.Fatalf("SEC-31 FAILED: Failed to unmarshal vet result: %v", err)
+		if toolRes.StructuredContent == nil {
+			t.Fatalf("SEC-31 FAILED: Expected UB-MCP-v1 structuredContent on blocked airlock_vet")
 		}
-
-		if vetRes.Passed {
-			t.Errorf("SEC-31 FAILED: Expected vet result Passed=false in strict mode")
+		scBytes, err := json.Marshal(toolRes.StructuredContent)
+		if err != nil {
+			t.Fatalf("SEC-31 FAILED: Failed to marshal structuredContent: %v", err)
 		}
-		if vetRes.HighCritical == 0 {
-			t.Errorf("SEC-31 FAILED: Expected High/Critical issues detected")
+		var ubErr mcp.UBMCPError
+		if err := json.Unmarshal(scBytes, &ubErr); err != nil {
+			t.Fatalf("SEC-31 FAILED: Failed to unmarshal UBMCPError: %v", err)
+		}
+		if ubErr.ExitCode != mcp.ExitSupplyChainBlock {
+			t.Errorf("SEC-31 FAILED: Expected UB-MCP-v1 exit_code %d, got %d", mcp.ExitSupplyChainBlock, ubErr.ExitCode)
+		}
+		if ubErr.Code != "AIRLOCK_VET_BLOCKED" {
+			t.Errorf("SEC-31 FAILED: Expected AIRLOCK_VET_BLOCKED, got %q", ubErr.Code)
 		}
 	})
 }

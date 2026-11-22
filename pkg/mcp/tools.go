@@ -3,9 +3,12 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 	"github.com/bonjoski/airlock/pkg/config"
 	"github.com/bonjoski/airlock/pkg/redact"
 	"github.com/bonjoski/airlock/pkg/sandbox"
+	"github.com/bonjoski/airlock/pkg/secrets"
 	"github.com/bonjoski/airlock/pkg/vet"
 )
 
@@ -75,6 +79,22 @@ func SupportedTools() []Tool {
 						Description: "Maximum execution timeout in seconds. Defaults to 120 seconds.",
 						Default:     120,
 					},
+					"secret_leases": {
+						Type:        "array",
+						Description: "Opaque Locksmith lease handles (lease_...) redeemed directly inside the sandbox without exposing secret bytes to the LLM.",
+						Items: map[string]interface{}{
+							"type": "string",
+						},
+					},
+					"session_id": {
+						Type:        "string",
+						Description: "Optional Fabrial session identifier (sess_...) for opaque lease binding and BLPR-v1 receipt correlation. Defaults to FABRIAL_SESSION_ID.",
+					},
+					"emit_receipt": {
+						Type:        "boolean",
+						Description: "Emit a BLPR-v1 DSSE/in-toto receipt under FABRIAL_RECEIPT_DIR. Defaults to true when FABRIAL_SESSION_ID or session_id is set.",
+						Default:     true,
+					},
 				},
 				Required: []string{"command"},
 			},
@@ -97,6 +117,15 @@ func SupportedTools() []Tool {
 					"strict": {
 						Type:        "boolean",
 						Description: "If true, treat High and Critical security findings as fatal policy violations.",
+						Default:     true,
+					},
+					"session_id": {
+						Type:        "string",
+						Description: "Optional Fabrial session identifier (sess_...) for BLPR-v1 receipt correlation. Defaults to FABRIAL_SESSION_ID.",
+					},
+					"emit_receipt": {
+						Type:        "boolean",
+						Description: "Emit a BLPR-v1 DSSE/in-toto receipt under FABRIAL_RECEIPT_DIR. Defaults to true when FABRIAL_SESSION_ID or session_id is set.",
 						Default:     true,
 					},
 				},
@@ -161,10 +190,96 @@ type ExecArgs struct {
 	AllowDomains   []string `json:"allow_domains,omitempty"`
 	KeepEnv        []string `json:"keep_env,omitempty"`
 	TimeoutSeconds int      `json:"timeout_seconds,omitempty"`
+	SecretLeases   []string `json:"secret_leases,omitempty"`
+	SessionID      string   `json:"session_id,omitempty"`
+	EmitReceipt    *bool    `json:"emit_receipt,omitempty"`
 }
 
 // ExecResult represents structured execution output.
 type ExecResult = sandbox.ExecResult
+
+type redeemedLease struct {
+	envVar string
+	secret []byte
+}
+
+func resolveSessionID(explicit string) string {
+	if s := strings.TrimSpace(explicit); s != "" {
+		return s
+	}
+	return strings.TrimSpace(os.Getenv("FABRIAL_SESSION_ID"))
+}
+
+func shouldEmitReceipt(explicit *bool, sessionID string) bool {
+	if explicit != nil {
+		return *explicit
+	}
+	return sessionID != "" || strings.TrimSpace(os.Getenv("FABRIAL_RECEIPT_DIR")) != ""
+}
+
+func kernelBackendName() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "seatbelt"
+	case "linux":
+		return "landlock"
+	case "windows":
+		return "job_object"
+	default:
+		return runtime.GOOS
+	}
+}
+
+func detectLeasedSecretLeak(stdout, stderr []byte, leases []redeemedLease) (string, bool) {
+	for _, l := range leases {
+		if len(l.secret) == 0 {
+			continue
+		}
+		if bytes.Contains(stdout, l.secret) || bytes.Contains(stderr, l.secret) {
+			return l.envVar, true
+		}
+		if len(l.secret) >= 8 {
+			encoded := make([]byte, base64.StdEncoding.EncodedLen(len(l.secret)))
+			base64.StdEncoding.Encode(encoded, l.secret)
+			leaked := bytes.Contains(stdout, encoded) || bytes.Contains(stderr, encoded)
+			clear(encoded)
+			if leaked {
+				return l.envVar, true
+			}
+		}
+	}
+	return "", false
+}
+
+func isSandboxDenial(execErr error, stderrStr, stdoutStr string) bool {
+	combined := strings.ToLower(stderrStr + "\n" + stdoutStr)
+	if execErr != nil {
+		combined += "\n" + strings.ToLower(execErr.Error())
+	}
+	signals := []string{
+		"operation not permitted",
+		"permission denied",
+		"read-only file system",
+		"sandbox-exec",
+		"seatbelt",
+		"landlock",
+		"seccomp",
+		"bwrap",
+		"unprivileged user namespaces are disabled",
+		"airgap",
+		"egress",
+		"blocked by zero-trust",
+		"proxy refused",
+		"403 forbidden",
+		"sandbox: ",
+	}
+	for _, sig := range signals {
+		if strings.Contains(combined, sig) {
+			return true
+		}
+	}
+	return false
+}
 
 func (h *DefaultToolHandler) HandleExec(ctx context.Context, rawArgs json.RawMessage) (*CallToolResult, error) {
 	var args ExecArgs
@@ -173,10 +288,14 @@ func (h *DefaultToolHandler) HandleExec(ctx context.Context, rawArgs json.RawMes
 	}
 
 	if strings.TrimSpace(args.Command) == "" {
-		return &CallToolResult{
-			Content: []ContentItem{{Type: "text", Text: "error: 'command' argument is required"}},
-			IsError: true,
-		}, nil
+		return NewUBMCPErrorResult(&UBMCPError{
+			Code:           "AIRLOCK_INVALID_ARGS",
+			ExitCode:       ExitRuntimeErr,
+			Retryable:      true,
+			Summary:        "Missing required 'command' argument for airlock_exec.",
+			RemediationCmd: "airlock run -- <command>",
+			Why:            "Airlock requires an explicit command to execute inside the sandbox boundary.",
+		}), nil
 	}
 
 	// 1. Resolve Command tokens
@@ -188,19 +307,74 @@ func (h *DefaultToolHandler) HandleExec(ctx context.Context, rawArgs json.RawMes
 	}
 
 	if len(cmdTokens) == 0 {
-		return &CallToolResult{
-			Content: []ContentItem{{Type: "text", Text: "error: command must contain at least one token"}},
-			IsError: true,
-		}, nil
+		return NewUBMCPErrorResult(&UBMCPError{
+			Code:           "AIRLOCK_INVALID_ARGS",
+			ExitCode:       ExitRuntimeErr,
+			Retryable:      true,
+			Summary:        "Command for airlock_exec must contain at least one executable token.",
+			RemediationCmd: "airlock run -- <command>",
+			Why:            "Airlock requires an explicit executable token to confine inside the sandbox.",
+		}), nil
 	}
 
-	// 2. Resolve Workspace
+	// 2. Resolve Workspace & Receipt Policy Context
 	workspaceRoot := args.Workspace
 	if workspaceRoot == "" {
 		cwd, err := os.Getwd()
 		if err == nil {
 			workspaceRoot = sandbox.FindWorkspaceRoot(cwd)
 		}
+	}
+
+	sessionID := resolveSessionID(args.SessionID)
+	emitReceipt := shouldEmitReceipt(args.EmitReceipt, sessionID)
+	receiptDir := strings.TrimSpace(os.Getenv("FABRIAL_RECEIPT_DIR"))
+
+	if emitReceipt && receiptDir != "" {
+		if err := ValidateReceiptDir(receiptDir, workspaceRoot); err != nil {
+			return NewUBMCPErrorResult(&UBMCPError{
+				Code:           "AIRLOCK_RECEIPT_POLICY_DENIED",
+				ExitCode:       ExitPolicyDeny,
+				Retryable:      false,
+				Summary:        "Refused receipt persistence because FABRIAL_RECEIPT_DIR failed non-symlink security verification.",
+				RemediationCmd: "fabrial doctor --fix",
+				Why:            "Receipt directories must be real user-owned directories (O_NOFOLLOW) to prevent symlink traversal attacks.",
+				DeepWhy:        err.Error(),
+				References:     []string{"https://github.com/bonjoski/airlock/blob/main/README.md"},
+			}), nil
+		}
+	}
+
+	// Helper to emit a BLPR-v1 receipt without ever embedding secret values.
+	emitExecReceipt := func(verdict Verdict, ffCode string, exitCode int, airgapMode bool, leaseCount int) (string, error) {
+		if !emitReceipt || receiptDir == "" {
+			return "", nil
+		}
+		egressMode := "proxy_allowlist"
+		if airgapMode {
+			egressMode = "airgap"
+		} else if args.AllowNetwork {
+			egressMode = "direct_network"
+		}
+		rcptID, _, err := EmitReceipt(ctx, ReceiptParams{
+			ReceiptDir:    receiptDir,
+			WorkspaceRoot: workspaceRoot,
+			SessionID:     sessionID,
+			SubjectName:   cmdTokens[0],
+			SubjectData:   []byte(strings.Join(cmdTokens, "\x00")),
+			Verdict:       verdict,
+			Claims: map[string]any{
+				"tool_action":    "airlock_exec",
+				"profile_mode":   config.ProfileAgent,
+				"kernel_backend": kernelBackendName(),
+				"egress_mode":    egressMode,
+				"airgap":         airgapMode,
+				"exit_code":      exitCode,
+				"leases_count":   leaseCount,
+			},
+			FixForwardCode: ffCode,
+		})
+		return rcptID, err
 	}
 
 	// 3. Load Declarative Config on top of hardened 'agent' profile baseline (AIR-02 / AIR-05)
@@ -264,6 +438,33 @@ func (h *DefaultToolHandler) HandleExec(ctx context.Context, rawArgs json.RawMes
 		ignoredVetRules = append(ignoredVetRules, loadedCfg.Vetting.IgnoredRules...)
 	}
 
+	// 3b. Redeem Opaque Secret Leases via Locksmith UDS (zero raw secrets exposed to LLM)
+	var redeemed []redeemedLease
+	var injectedEnv []string
+	if len(args.SecretLeases) > 0 {
+		lsClient := secrets.NewLocksmithClient("")
+		for _, leaseID := range args.SecretLeases {
+			envVar, secretBytes, cleanup, err := lsClient.RedeemOpaqueLease(ctx, leaseID, sessionID)
+			if err != nil {
+				rcptID, _ := emitExecReceipt(VerdictDeny, "AIRLOCK_LEASE_DENIED", ExitSecretGuardBlock, airgap, len(args.SecretLeases))
+				return NewUBMCPErrorResult(&UBMCPError{
+					Code:           "AIRLOCK_LEASE_DENIED",
+					ExitCode:       ExitSecretGuardBlock,
+					Retryable:      false,
+					Summary:        "Unable to redeem opaque secret lease from local Locksmith daemon.",
+					RemediationCmd: "fabrial session begin",
+					Why:            "Opaque secret leases are session-bound and single-use to prevent unauthorized credential replay.",
+					DeepWhy:        err.Error(),
+					ReceiptID:      rcptID,
+					References:     []string{"https://github.com/bonjoski/airlock/blob/main/README.md"},
+				}), nil
+			}
+			defer cleanup()
+			redeemed = append(redeemed, redeemedLease{envVar: envVar, secret: secretBytes})
+			injectedEnv = append(injectedEnv, envVar+"="+string(secretBytes))
+		}
+	}
+
 	// 4. Setup buffers
 	var stdoutBuf bytes.Buffer
 	var stderrBuf bytes.Buffer
@@ -286,6 +487,7 @@ func (h *DefaultToolHandler) HandleExec(ctx context.Context, rawArgs json.RawMes
 		AllowedUnixSockets:   allowedUnixSockets,
 		AllowedLoopbackPorts: allowedLoopbackPorts,
 		AllowedDomains:       extraDomains,
+		ExtraEnv:             injectedEnv,
 		KeepEnv:              keptEnvVars,
 		DenyEnv:              deniedEnvVars,
 		ExtraAllowRead:       extraAllowRead,
@@ -303,17 +505,19 @@ func (h *DefaultToolHandler) HandleExec(ctx context.Context, rawArgs json.RawMes
 
 	eng, err := sandbox.NewEngine(opts)
 	if err != nil {
-		res := ExecResult{
-			ExitCode:       1,
-			Error:          fmt.Sprintf("failed to initialize sandbox engine: %v", err),
-			Airgap:         airgap,
-			AllowedDomains: extraDomains,
-		}
-		resBytes, _ := json.MarshalIndent(res, "", "  ")
-		return &CallToolResult{
-			Content: []ContentItem{{Type: "text", Text: string(resBytes)}},
-			IsError: true,
-		}, nil
+		clear(injectedEnv)
+		rcptID, _ := emitExecReceipt(VerdictDeny, "AIRLOCK_SANDBOX_DENIED", ExitSandboxViolation, airgap, len(redeemed))
+		return NewUBMCPErrorResult(&UBMCPError{
+			Code:           "AIRLOCK_SANDBOX_DENIED",
+			ExitCode:       ExitSandboxViolation,
+			Retryable:      false,
+			Summary:        "Failed to initialize kernel sandbox confinement engine.",
+			RemediationCmd: "airlock doctor",
+			Why:            "Airlock fails closed whenever OS sandbox primitives cannot be initialized.",
+			DeepWhy:        err.Error(),
+			ReceiptID:      rcptID,
+			References:     []string{"https://github.com/bonjoski/airlock/blob/main/README.md"},
+		}), nil
 	}
 
 	// 6. Timeout handling
@@ -327,11 +531,103 @@ func (h *DefaultToolHandler) HandleExec(ctx context.Context, rawArgs json.RawMes
 	start := time.Now()
 	exitCode, execErr := eng.Execute(execCtx, cmdTokens)
 	duration := time.Since(start)
+	clear(injectedEnv)
+
+	rawOut := stdoutBuf.Bytes()
+	rawErr := stderrBuf.Bytes()
+	if len(redeemed) > 0 {
+		defer func() {
+			clear(rawOut)
+			clear(rawErr)
+		}()
+		// 7. Fail closed if ANY redeemed leased secret leaked into child stdout or stderr
+		if leakedVar, leaked := detectLeasedSecretLeak(rawOut, rawErr, redeemed); leaked {
+			clear(rawOut)
+			clear(rawErr)
+			rcptID, rcptErr := emitExecReceipt(VerdictDeny, "AIRLOCK_SECRET_LEAK_BLOCKED", ExitSecretGuardBlock, airgap, len(redeemed))
+			if rcptErr != nil && errors.Is(rcptErr, ErrReceiptSymlinkPolicy) {
+				return NewUBMCPErrorResult(&UBMCPError{
+					Code:           "AIRLOCK_RECEIPT_POLICY_DENIED",
+					ExitCode:       ExitPolicyDeny,
+					Retryable:      false,
+					Summary:        "Refused receipt persistence because FABRIAL_RECEIPT_DIR failed non-symlink verification.",
+					RemediationCmd: "fabrial doctor --fix",
+					Why:            "Receipt directories must be real user-owned directories (O_NOFOLLOW).",
+				}), nil
+			}
+			return NewUBMCPErrorResult(&UBMCPError{
+				Code:           "AIRLOCK_SECRET_LEAK_BLOCKED",
+				ExitCode:       ExitSecretGuardBlock,
+				Retryable:      false,
+				Summary:        fmt.Sprintf("Blocked output from leaking leased secret for %s.", leakedVar),
+				RemediationCmd: "airlock explain sandbox --why",
+				Why:            "Airlock scrubs and blocks output containing leased credentials so raw secrets never enter the LLM context window.",
+				ReceiptID:      rcptID,
+				References:     []string{"https://github.com/bonjoski/airlock/blob/main/README.md"},
+			}), nil
+		}
+	}
+
+	redactedStdout := redact.RedactString(string(rawOut))
+	redactedStderr := redact.RedactString(string(rawErr))
+
+	// 8. Classify Argus pre-exec vetting block vs. sandbox confinement violation vs. regular execution result
+	if execErr != nil && strings.Contains(execErr.Error(), "Argus static analysis") {
+		rcptID, _ := emitExecReceipt(VerdictDeny, "AIRLOCK_VET_BLOCKED", ExitSupplyChainBlock, airgap, len(redeemed))
+		return NewUBMCPErrorResult(&UBMCPError{
+			Code:           "AIRLOCK_VET_BLOCKED",
+			ExitCode:       ExitSupplyChainBlock,
+			Retryable:      true,
+			Summary:        "Paused execution after Argus static analysis detected high-risk supply-chain or shell patterns.",
+			RemediationCmd: "airlock vet --strict",
+			Why:            "Pre-execution vetting blocks typosquatted packages and malicious install scripts before code runs.",
+			DeepWhy:        redactedStderr,
+			ReceiptID:      rcptID,
+			References:     []string{"https://github.com/bonjoski/airlock/blob/main/docs/use-cases/03-preflight-policy-vetting.md"},
+		}), nil
+	}
+
+	if (exitCode != 0 || execErr != nil) && isSandboxDenial(execErr, redactedStderr, redactedStdout) {
+		rcptID, _ := emitExecReceipt(VerdictDeny, "AIRLOCK_SANDBOX_DENIED", ExitSandboxViolation, airgap, len(redeemed))
+		detail := strings.TrimSpace(redactedStderr)
+		if detail == "" && execErr != nil {
+			detail = execErr.Error()
+		}
+		return NewUBMCPErrorResult(&UBMCPError{
+			Code:           "AIRLOCK_SANDBOX_DENIED",
+			ExitCode:       ExitSandboxViolation,
+			Retryable:      true,
+			Summary:        fmt.Sprintf("Airlock sandbox denied command '%s' due to confinement policy.", cmdTokens[0]),
+			RemediationCmd: "airlock explain sandbox --why",
+			Why:            "Airlock confines processes to the active workspace and allowlisted egress domains to protect host credentials.",
+			DeepWhy:        detail,
+			ReceiptID:      rcptID,
+			References:     []string{"https://github.com/bonjoski/airlock/blob/main/README.md"},
+		}), nil
+	}
+
+	verdict := VerdictAllow
+	ffCode := ""
+	if exitCode != 0 || execErr != nil {
+		verdict = VerdictDeny
+		ffCode = "AIRLOCK_COMMAND_FAILED"
+	}
+	rcptID, rcptErr := emitExecReceipt(verdict, ffCode, exitCode, airgap, len(redeemed))
+	if rcptErr != nil && errors.Is(rcptErr, ErrReceiptSymlinkPolicy) {
+		return NewUBMCPErrorResult(&UBMCPError{
+			Code:           "AIRLOCK_RECEIPT_POLICY_DENIED",
+			ExitCode:       ExitPolicyDeny,
+			Retryable:      false,
+			Summary:        "Refused receipt persistence because FABRIAL_RECEIPT_DIR failed non-symlink verification.",
+			RemediationCmd: "fabrial doctor --fix",
+			Why:            "Receipt directories must be real user-owned directories (O_NOFOLLOW).",
+		}), nil
+	}
 
 	res := ExecResult{
 		ExitCode:       exitCode,
-		Stdout:         redact.RedactString(stdoutBuf.String()),
-		Stderr:         redact.RedactString(stderrBuf.String()),
+		Stdout:         redactedStdout,
+		Stderr:         redactedStderr,
 		DurationMs:     duration.Milliseconds(),
 		Airgap:         airgap,
 		AllowedDomains: extraDomains,
@@ -345,17 +641,33 @@ func (h *DefaultToolHandler) HandleExec(ctx context.Context, rawArgs json.RawMes
 		return nil, fmt.Errorf("failed to format execution result: %w", err)
 	}
 
-	return &CallToolResult{
+	callRes := &CallToolResult{
 		Content: []ContentItem{{Type: "text", Text: string(resBytes)}},
-		IsError: exitCode != 0,
-	}, nil
+		IsError: exitCode != 0 || execErr != nil,
+	}
+	if callRes.IsError {
+		callRes.StructuredContent = SanitizeUBMCPError(&UBMCPError{
+			Code:           "AIRLOCK_COMMAND_FAILED",
+			ExitCode:       ExitRuntimeErr,
+			Retryable:      true,
+			Summary:        fmt.Sprintf("Sandboxed command '%s' exited with code %d.", cmdTokens[0], exitCode),
+			RemediationCmd: "airlock doctor",
+			Why:            "The confined command returned a non-zero exit status; inspect stdout/stderr for command diagnostics.",
+			DeepWhy:        redactedStderr,
+			ReceiptID:      rcptID,
+			References:     []string{"https://github.com/bonjoski/airlock/blob/main/README.md"},
+		})
+	}
+	return callRes, nil
 }
 
 // VetArgs represents input arguments for airlock_vet.
 type VetArgs struct {
-	Command   string `json:"command,omitempty"`
-	Workspace string `json:"workspace,omitempty"`
-	Strict    bool   `json:"strict,omitempty"`
+	Command     string `json:"command,omitempty"`
+	Workspace   string `json:"workspace,omitempty"`
+	Strict      bool   `json:"strict,omitempty"`
+	SessionID   string `json:"session_id,omitempty"`
+	EmitReceipt *bool  `json:"emit_receipt,omitempty"`
 }
 
 // VetFinding represents a single finding in the report.
@@ -401,6 +713,25 @@ func (h *DefaultToolHandler) HandleVet(ctx context.Context, rawArgs json.RawMess
 		}
 	}
 
+	sessionID := resolveSessionID(args.SessionID)
+	emitReceipt := shouldEmitReceipt(args.EmitReceipt, sessionID)
+	receiptDir := strings.TrimSpace(os.Getenv("FABRIAL_RECEIPT_DIR"))
+
+	if emitReceipt && receiptDir != "" {
+		if err := ValidateReceiptDir(receiptDir, targetWorkspace); err != nil {
+			return NewUBMCPErrorResult(&UBMCPError{
+				Code:           "AIRLOCK_RECEIPT_POLICY_DENIED",
+				ExitCode:       ExitPolicyDeny,
+				Retryable:      false,
+				Summary:        "Refused receipt persistence because FABRIAL_RECEIPT_DIR failed non-symlink security verification.",
+				RemediationCmd: "fabrial doctor --fix",
+				Why:            "Receipt directories must be real user-owned directories (O_NOFOLLOW) to prevent symlink traversal attacks.",
+				DeepWhy:        err.Error(),
+				References:     []string{"https://github.com/bonjoski/airlock/blob/main/README.md"},
+			}), nil
+		}
+	}
+
 	report, err := eng.Inspect(ctx, cmdTokens, targetWorkspace)
 	if err != nil {
 		return nil, fmt.Errorf("argus inspection failed: %w", err)
@@ -433,6 +764,72 @@ func (h *DefaultToolHandler) HandleVet(ctx context.Context, rawArgs json.RawMess
 		summary = fmt.Sprintf("Argus detected %d informational/low issues.", len(findingsList))
 	}
 
+	var rcptID string
+	if emitReceipt && receiptDir != "" {
+		verdict := VerdictAllow
+		ffCode := ""
+		if !passed {
+			verdict = VerdictDeny
+			ffCode = "AIRLOCK_VET_BLOCKED"
+		}
+		subjName := targetWorkspace
+		if len(cmdTokens) > 0 {
+			subjName = cmdTokens[0]
+		}
+		if subjName == "" {
+			subjName = "airlock-vet"
+		}
+		id, _, rcptErr := EmitReceipt(ctx, ReceiptParams{
+			ReceiptDir:    receiptDir,
+			WorkspaceRoot: targetWorkspace,
+			SessionID:     sessionID,
+			SubjectName:   subjName,
+			SubjectData:   []byte(args.Command + "\x00" + targetWorkspace),
+			Verdict:       verdict,
+			Claims: map[string]any{
+				"tool_action":          "airlock_vet",
+				"strict":               args.Strict,
+				"total_issues":         len(findingsList),
+				"high_critical_issues": highCriticalCount,
+			},
+			FixForwardCode: ffCode,
+		})
+		if rcptErr != nil && errors.Is(rcptErr, ErrReceiptSymlinkPolicy) {
+			return NewUBMCPErrorResult(&UBMCPError{
+				Code:           "AIRLOCK_RECEIPT_POLICY_DENIED",
+				ExitCode:       ExitPolicyDeny,
+				Retryable:      false,
+				Summary:        "Refused receipt persistence because FABRIAL_RECEIPT_DIR failed non-symlink verification.",
+				RemediationCmd: "fabrial doctor --fix",
+				Why:            "Receipt directories must be real user-owned directories (O_NOFOLLOW).",
+			}), nil
+		}
+		rcptID = id
+	}
+
+	if !passed {
+		var detailLines []string
+		for _, f := range findingsList {
+			detailLines = append(detailLines, fmt.Sprintf("[%s] %s: %s", f.Severity, f.RuleID, f.Description))
+		}
+		return NewUBMCPErrorResult(&UBMCPError{
+			Code:           "AIRLOCK_VET_BLOCKED",
+			ExitCode:       ExitSupplyChainBlock,
+			Retryable:      true,
+			Summary:        summary,
+			RemediationCmd: "airlock vet --strict",
+			Why:            "Pre-execution static analysis blocks typosquatted packages and malicious install hooks before execution.",
+			DeepWhy:        strings.Join(detailLines, "\n"),
+			SelfHeal: &SelfHealHint{
+				SuggestedTool:         "airlock_vet",
+				SuggestedArgs:         map[string]any{"strict": true},
+				RequiresHumanApproval: true,
+			},
+			ReceiptID:  rcptID,
+			References: []string{"https://github.com/bonjoski/airlock/blob/main/docs/use-cases/03-preflight-policy-vetting.md"},
+		}), nil
+	}
+
 	res := VetResult{
 		Passed:       passed,
 		Strict:       args.Strict,
@@ -449,7 +846,7 @@ func (h *DefaultToolHandler) HandleVet(ctx context.Context, rawArgs json.RawMess
 
 	return &CallToolResult{
 		Content: []ContentItem{{Type: "text", Text: string(resBytes)}},
-		IsError: !passed,
+		IsError: false,
 	}, nil
 }
 

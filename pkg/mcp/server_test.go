@@ -213,12 +213,22 @@ func TestMCPServer_ToolCall_Vet(t *testing.T) {
 		t.Errorf("Expected malicious typosquat check to fail with isError=true")
 	}
 
-	var badVetRes VetResult
-	if err := json.Unmarshal([]byte(badToolRes.Content[0].Text), &badVetRes); err != nil {
-		t.Fatalf("Failed to parse VetResult: %v", err)
+	if badToolRes.StructuredContent == nil {
+		t.Fatalf("Expected UB-MCP-v1 structuredContent for blocked airlock_vet")
 	}
-	if badVetRes.HighCritical == 0 {
-		t.Errorf("Expected High/Critical findings for crossenv, got %d", badVetRes.HighCritical)
+	scBytes, err := json.Marshal(badToolRes.StructuredContent)
+	if err != nil {
+		t.Fatalf("Failed to marshal structuredContent: %v", err)
+	}
+	var sc UBMCPError
+	if err := json.Unmarshal(scBytes, &sc); err != nil {
+		t.Fatalf("Failed to parse UBMCPError structuredContent: %v", err)
+	}
+	if sc.ExitCode != ExitSupplyChainBlock {
+		t.Errorf("Expected exit_code %d for crossenv, got %d", ExitSupplyChainBlock, sc.ExitCode)
+	}
+	if sc.Code != "AIRLOCK_VET_BLOCKED" {
+		t.Errorf("Expected code AIRLOCK_VET_BLOCKED, got %q", sc.Code)
 	}
 }
 

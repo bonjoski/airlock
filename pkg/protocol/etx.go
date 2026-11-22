@@ -29,11 +29,13 @@ const (
 type Action string
 
 const (
-	ActionRequestLease  Action = "request_lease"
-	ActionRevokeLease   Action = "revoke_lease"
-	ActionCreateSession Action = "create_session"
-	ActionRevokeSession Action = "revoke_session"
-	ActionPing          Action = "ping"
+	ActionRequestLease      Action = "request_lease"
+	ActionRevokeLease       Action = "revoke_lease"
+	ActionCreateSession     Action = "create_session"
+	ActionRevokeSession     Action = "revoke_session"
+	ActionRedeemOpaqueLease Action = "redeem_opaque_lease"
+	ActionSignDSSE          Action = "sign_dsse"
+	ActionPing              Action = "ping"
 )
 
 // LeaseRequest represents an inquiry from Airlock/Agent runner to Locksmith.
@@ -110,6 +112,89 @@ type RevokeRequest struct {
 type RevokeResponse struct {
 	Success bool   `json:"success"`
 	Error   string `json:"error,omitempty"`
+}
+
+// RedeemOpaqueLeaseRequest exchanges an opaque lease handle for secret bytes
+// strictly inside an attested sandbox binary (never returned to the LLM caller).
+type RedeemOpaqueLeaseRequest struct {
+	Version          string `json:"version"`
+	Action           Action `json:"action"`
+	LeaseID          string `json:"lease_id"`
+	SessionID        string `json:"session_id"`
+	ClientPID        int    `json:"client_pid"`
+	ProcessStartTime int64  `json:"process_start_time"`
+	ClientBinaryHash string `json:"client_binary_hash"`
+}
+
+// Validate checks the completeness and sanity of an opaque lease redemption request.
+func (r *RedeemOpaqueLeaseRequest) Validate() error {
+	if r.Version != ProtocolVersion {
+		return fmt.Errorf("etx: unsupported protocol version %q, expected %q", r.Version, ProtocolVersion)
+	}
+	if r.Action != ActionRedeemOpaqueLease {
+		return fmt.Errorf("etx: unexpected action %q, expected %q", r.Action, ActionRedeemOpaqueLease)
+	}
+	if strings.TrimSpace(r.LeaseID) == "" {
+		return errors.New("etx: lease_id cannot be empty")
+	}
+	if r.ClientPID <= 0 {
+		return errors.New("etx: client_pid must be positive")
+	}
+	if r.ProcessStartTime <= 0 {
+		return errors.New("etx: process_start_time must be positive (used for PID recycling protection)")
+	}
+	return nil
+}
+
+// RedeemOpaqueLeaseResponse returns the resolved env var name and base64-encoded secret bytes.
+type RedeemOpaqueLeaseResponse struct {
+	Status    LeaseStatus `json:"status"`
+	LeaseID   string      `json:"lease_id,omitempty"`
+	EnvVar    string      `json:"env_var,omitempty"`
+	SecretB64 string      `json:"secret_b64,omitempty"`
+	ExpiresAt time.Time   `json:"expires_at,omitempty"`
+	Error     string      `json:"error,omitempty"`
+}
+
+// SignDSSERequest requests amortized session Ed25519 signing of a DSSE PAE payload.
+type SignDSSERequest struct {
+	Version          string `json:"version"`
+	Action           Action `json:"action"`
+	SessionID        string `json:"session_id"`
+	PAEB64           string `json:"pae_b64"`
+	ClientPID        int    `json:"client_pid"`
+	ProcessStartTime int64  `json:"process_start_time"`
+	ClientBinaryHash string `json:"client_binary_hash"`
+}
+
+// Validate checks the completeness and sanity of a DSSE signing request.
+func (r *SignDSSERequest) Validate() error {
+	if r.Version != ProtocolVersion {
+		return fmt.Errorf("etx: unsupported protocol version %q, expected %q", r.Version, ProtocolVersion)
+	}
+	if r.Action != ActionSignDSSE {
+		return fmt.Errorf("etx: unexpected action %q, expected %q", r.Action, ActionSignDSSE)
+	}
+	if strings.TrimSpace(r.PAEB64) == "" {
+		return errors.New("etx: pae_b64 cannot be empty")
+	}
+	if r.ClientPID <= 0 {
+		return errors.New("etx: client_pid must be positive")
+	}
+	if r.ProcessStartTime <= 0 {
+		return errors.New("etx: process_start_time must be positive (used for PID recycling protection)")
+	}
+	return nil
+}
+
+// SignDSSEResponse returns the SPIFFE key ID and base64-encoded Ed25519 signature.
+type SignDSSEResponse struct {
+	Status   LeaseStatus `json:"status,omitempty"`
+	KeyID    string      `json:"keyid,omitempty"`
+	KeyIDAlt string      `json:"key_id,omitempty"`
+	SigB64   string      `json:"sig_b64,omitempty"`
+	Sig      string      `json:"sig,omitempty"`
+	Error    string      `json:"error,omitempty"`
 }
 
 // SessionTicket allows multiple agent sub-commands to avoid biometric prompt fatigue.
