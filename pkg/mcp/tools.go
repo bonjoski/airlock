@@ -278,6 +278,19 @@ func isSandboxDenial(execErr error, stderrStr, stdoutStr string) bool {
 			return true
 		}
 	}
+	// On Linux bwrap, masked host credential paths are overmounted with /dev/null or empty tmpfs,
+	// yielding "not a directory" or "no such file or directory" when a confined command probes them.
+	if strings.Contains(combined, "not a directory") || strings.Contains(combined, "no such file or directory") {
+		maskedPaths := []string{
+			"/.ssh", "/.aws", "/.gnupg", "/.kube", "/.docker",
+			"/.config/gcloud", "/.npmrc", "/.netrc", "/.pypirc", "/.git-credentials",
+		}
+		for _, mp := range maskedPaths {
+			if strings.Contains(combined, mp) {
+				return true
+			}
+		}
+	}
 	return false
 }
 
