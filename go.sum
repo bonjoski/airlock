@@ -1,5 +1,5 @@
-github.com/bonjoski/shield v0.2.1 h1:+lqk/VasZY//NEitHLksaKj+7HVrCRc3xHIGU/ItMlw=
-github.com/bonjoski/shield v0.2.1/go.mod h1:tEaEPPXvMELlH/4Xopenj+JUfqsBTzaDGW2MfN2Oa2s=
+github.com/bonjoski/shield v0.3.0 h1:QWOC7JCVEQfvTgtN0k0CYB8NpkbXsFno105fqSqD6tw=
+github.com/bonjoski/shield v0.3.0/go.mod h1:IcS8uOoR7ZOaPqkrXSs/IwYNnsAbS1juGFkpXOcSunM=
 golang.org/x/sys v0.47.0 h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=
 golang.org/x/sys v0.47.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405 h1:yhCVgyC4o1eVCa2tZl7eS0r+SDo693bJlVdllGtEeKM=
