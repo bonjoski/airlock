@@ -94,6 +94,11 @@ func (w *WindowsEngine) Execute(ctx context.Context, cmdArgs []string) (int, err
 		return 1, errors.New("sandbox: no command specified for execution")
 	}
 
+	// 0. Archive Extraction & Zip-Slip Confinement Gate (GHSA-qh76-45cr-8xrc)
+	if err := ValidateArchiveCommandConfinement(w.opts.WorkspaceRoot, w.opts.WorkingDir, cmdArgs); err != nil {
+		return 1, err
+	}
+
 	// 1. Recursive Sandbox Detection (V-14 / Phase 1)
 	if os.Getenv("__AIRLOCK_ACTIVE") == "1" {
 		cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)

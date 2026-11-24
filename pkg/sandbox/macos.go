@@ -50,6 +50,11 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 		return 1, errors.New("sandbox: no command specified for execution")
 	}
 
+	// 0. Archive Extraction & Zip-Slip Confinement Gate (GHSA-qh76-45cr-8xrc)
+	if err := ValidateArchiveCommandConfinement(m.opts.WorkspaceRoot, m.opts.WorkingDir, cmdArgs); err != nil {
+		return 1, err
+	}
+
 	// 1. Pre-Execution Static Analysis (Argus / vetpkg) — ALWAYS enforced, even when nested (AIR-03)
 	inspector := m.opts.Inspector
 	if inspector == nil && m.opts.VetEnabled {
