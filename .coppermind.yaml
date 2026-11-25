@@ -1,0 +1,6 @@
+scope: bonjoski/airlock
+paths:
+  pkg/seatbelt: bonjoski/airlock/seatbelt
+  pkg/landlock: bonjoski/airlock/landlock
+  pkg/seccomp: bonjoski/airlock/seccomp
+  pkg/mcp: bonjoski/airlock/mcp
