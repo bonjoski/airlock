@@ -127,12 +127,48 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 		_ = sc.Cleanup()
 	}()
 
-	// 4. Start Egress Proxy (unless in airgap mode, direct network mode, or mcp hermetic wrapper)
+	// 4. Start Egress Proxy (unless in airgap mode, direct network mode, mcp wrapper, or untrusted-agent keyless/airgap mode)
 	var prx proxy.Proxy
 	isMCP := strings.EqualFold(m.opts.Profile, "mcp") || strings.EqualFold(m.opts.Profile, "mcp-wrap") || strings.EqualFold(m.opts.Profile, "mcp_wrap")
-	if !m.opts.Airgap && !m.opts.AllowDirectNet && !isMCP {
+	isUntrustedAgent := strings.EqualFold(m.opts.Profile, "untrusted-agent") || strings.EqualFold(m.opts.Profile, "untrusted_agent")
+
+	var uaCfg profile.UntrustedAgentConfig
+	effectiveAirgap := m.opts.Airgap
+	effectiveAllowDirectNet := m.opts.AllowDirectNet
+	effectiveAllowedDomains := m.opts.AllowedDomains
+	if isUntrustedAgent {
+		uaCfg = profile.UntrustedAgentConfig{
+			WorkDir:          m.opts.WorkspaceRoot,
+			AllowEgressHosts: m.opts.AllowEgressHosts,
+			KeylessProxyAddr: m.opts.KeylessProxyAddr,
+		}
+		if len(uaCfg.AllowEgressHosts) > 0 {
+			if err := profile.ValidateEgressAllowlist(uaCfg.AllowEgressHosts); err != nil {
+				return 1, err
+			}
+			effectiveAllowedDomains = uaCfg.AllowEgressHosts
+		}
+		if uaCfg.KeylessProxyAddr != "" {
+			if _, err := profile.ValidateKeylessProxyAddr(uaCfg.KeylessProxyAddr); err != nil {
+				return 1, err
+			}
+		}
+		effectiveAllowDirectNet = false
+		if len(uaCfg.AllowEgressHosts) == 0 && uaCfg.KeylessProxyAddr == "" {
+			effectiveAirgap = true
+		} else {
+			effectiveAirgap = false
+		}
+	}
+
+	needBuiltInProxy := !effectiveAirgap && !effectiveAllowDirectNet && !isMCP
+	if isUntrustedAgent && uaCfg.KeylessProxyAddr != "" && len(uaCfg.AllowEgressHosts) == 0 {
+		needBuiltInProxy = false
+	}
+
+	if needBuiltInProxy {
 		p, err := proxy.NewWithOptions(proxy.Options{
-			AllowedDomains: m.opts.AllowedDomains,
+			AllowedDomains: effectiveAllowedDomains,
 			Logger:         m.opts.AuditLogger,
 			PromptHandler:  m.opts.PromptHandler,
 			ConfigPath:     m.opts.ConfigPath,
@@ -166,6 +202,7 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 	antiLoopback := m.opts.AntiLoopback
 	if m.opts.Profile == "anti-loopback" || m.opts.Profile == "anti_loopback" ||
 		m.opts.Profile == "dev-agent" || m.opts.Profile == "dev_agent" ||
+		isUntrustedAgent ||
 		m.opts.Profile == "mcp-gateway" || m.opts.Profile == "mcp_gateway" ||
 		m.opts.Profile == "agent" || m.opts.Profile == "strict-agent" {
 		antiLoopback = true
@@ -181,9 +218,9 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 		UserHome:             homeDir,
 		WorkspaceRoot:        m.opts.WorkspaceRoot,
 		ScratchDir:           sc.Root(),
-		Airgap:               m.opts.Airgap,
+		Airgap:               effectiveAirgap,
 		ProxyPort:            proxyPort,
-		AllowDirectNet:       m.opts.AllowDirectNet,
+		AllowDirectNet:       effectiveAllowDirectNet,
 		AntiLoopback:         antiLoopback,
 		AllowedUnixSockets:   m.opts.AllowedUnixSockets,
 		AllowedLoopbackPorts: m.opts.AllowedLoopbackPorts,
@@ -204,6 +241,8 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 		profileStr, err = profile.GenerateWebWorkerSeatbelt(seatbeltParams)
 	case "dev-agent", "dev_agent":
 		profileStr, err = profile.GenerateDevAgentSeatbelt(seatbeltParams)
+	case "untrusted-agent", "untrusted_agent":
+		profileStr, err = profile.GenerateUntrustedAgentSeatbelt(seatbeltParams, uaCfg)
 	default:
 		profileStr, err = m.generator.Generate(seatbeltParams)
 	}
@@ -224,6 +263,12 @@ func (m *MacOSEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 
 	sanitizer := env.NewSanitizer(envConfig)
 	sanitizedEnv := sanitizer.Sanitize(os.Environ())
+	if isUntrustedAgent {
+		sanitizedEnv, err = profile.BuildUntrustedAgentEnv(sanitizedEnv, uaCfg)
+		if err != nil {
+			return 1, fmt.Errorf("sandbox: failed to build untrusted-agent environment: %w", err)
+		}
+	}
 
 	// 6b. Ephemeral Secret Leasing (ETX / Locksmith Integration)
 	if len(m.opts.LeasedSecrets) > 0 {

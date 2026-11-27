@@ -14,6 +14,7 @@ import (
 	"github.com/bonjoski/airlock/pkg/config"
 	"github.com/bonjoski/airlock/pkg/interactive"
 	"github.com/bonjoski/airlock/pkg/mcp"
+	"github.com/bonjoski/airlock/pkg/profile"
 	"github.com/bonjoski/airlock/pkg/pty"
 	"github.com/bonjoski/airlock/pkg/redact"
 	"github.com/bonjoski/airlock/pkg/sandbox"
@@ -54,8 +55,7 @@ func main() {
 		handleDoctor(os.Args[2:])
 		os.Exit(0)
 	case "vet":
-		handleVet(os.Args[2:])
-		os.Exit(0)
+		os.Exit(runVet(os.Args[2:], os.Stdout, os.Stderr))
 	case "audit":
 		handleAudit(os.Args[2:])
 		os.Exit(0)
@@ -88,7 +88,7 @@ Usage:
   airlock run [flags] -- <command> [args...]
   airlock exec [flags] -- <command> [args...]
   airlock <command> [args...]
-  airlock vet [--strict] [--workspace <path>] [--json] [-- <command>]
+  airlock vet [--strict] [--dir <path>] [--workspace <path>] [--profile <name>] [--config <path>] [--sbpl <path>] [--json] [--why] [-- <command>]
   airlock init [--type <node|python|rust|go>]
   airlock config validate [--config <path>]
   airlock shim install [--target <dir>]
@@ -104,7 +104,9 @@ Usage:
 Flags:
   --why                 Progressive disclosure: expand confinement rationale and references on errors
   --json                Emit structured UB-CLI-v2 FixForwardError JSON on confinement/CLI errors
-  --profile <name>      Execution profile (standard, agent, dev-agent, mcp-gateway, web-worker, strict, airgap, default)
+  --profile <name>      Execution profile (standard, agent, dev-agent, untrusted-agent, mcp-gateway, web-worker, strict, airgap, default)
+  --allow-egress <doms> Comma-separated declared API hostnames for untrusted-agent egress (rejects wildcards/RFC1918/IMDS)
+  --keyless-proxy <ip>  Strict loopback proxy ip:port (127.0.0.1:<port> or [::1]:<port>) for keyless credential swapping
   --microvm             Tier 2 Confinement via Aegisbox hypervisor MicroVM
   --lease-secret <keys> Comma-separated secrets to lease dynamically via Locksmith
   --session-ticket <tk> Session ticket for autonomous agent batch loops
@@ -208,6 +210,8 @@ func handleRun(args []string) {
 		airgap         bool
 		allowDirectNet bool
 		allowDomains   string
+		allowEgress    string
+		keylessProxy   string
 		keepEnv        string
 		vetEnabled     bool
 		vetStrict      bool
@@ -225,7 +229,7 @@ func handleRun(args []string) {
 	)
 
 	fs.StringVar(&configPath, "config", "", "Path to declarative policy file")
-	fs.StringVar(&profileName, "profile", "", "Execution profile: standard, agent, dev-agent, mcp-gateway, web-worker, strict, airgap, default")
+	fs.StringVar(&profileName, "profile", "", "Execution profile: standard, agent, dev-agent, untrusted-agent, mcp-gateway, web-worker, strict, airgap, default")
 	fs.BoolVar(&microvm, "microvm", false, "Tier 2 hypervisor MicroVM isolation via Aegisbox")
 	fs.StringVar(&leaseSecrets, "lease-secret", "", "Comma-separated secrets to lease via Locksmith")
 	fs.StringVar(&sessionTicket, "session-ticket", "", "Session ticket for batch agent sub-commands")
@@ -235,6 +239,8 @@ func handleRun(args []string) {
 	fs.BoolVar(&airgap, "airgap", false, "Offline isolation")
 	fs.BoolVar(&allowDirectNet, "net", false, "Permit direct external network")
 	fs.StringVar(&allowDomains, "allow-domain", "", "Additional registry domains")
+	fs.StringVar(&allowEgress, "allow-egress", "", "Comma-separated declared API hostnames for untrusted-agent egress")
+	fs.StringVar(&keylessProxy, "keyless-proxy", "", "Strict loopback proxy ip:port (127.0.0.1:<port> or [::1]:<port>)")
 	fs.StringVar(&keepEnv, "keep-env", "", "Preserve environment variables")
 	fs.BoolVar(&vetEnabled, "vet", false, "Enable Argus static analysis inspection")
 	fs.BoolVar(&vetStrict, "vet-strict", false, "Fail closed on high/critical findings")
@@ -385,6 +391,75 @@ func handleRun(args []string) {
 		}
 	}
 
+	var egressHosts []string
+	if allowEgress != "" {
+		for _, h := range strings.Split(allowEgress, ",") {
+			egressHosts = append(egressHosts, strings.TrimSpace(h))
+		}
+		if err := profile.ValidateEgressAllowlist(egressHosts); err != nil {
+			ffe := &ux.FixForwardError{
+				Tool:           "airlock",
+				Code:           "AIRLOCK_INVALID_EGRESS_ALLOWLIST",
+				Summary:        err.Error(),
+				RemediationCmd: "airlock run --profile untrusted-agent --allow-egress api.anthropic.com -- <cmd>",
+				WhyOneLiner:    "Untrusted-agent egress allowlists only accept declared public FQDNs; wildcards, RFC1918, and IMDS addresses are blocked fail-closed.",
+				DeepWhy:        "To prevent data exfiltration and SSRF to local services or cloud metadata (169.254.169.254), --allow-egress strictly rejects wildcards (*), shell metacharacters, private IPv4/IPv6 ranges, and local hostnames.",
+				References:     []string{"RFC-2026-11-27-70", "CWE-918", "OWASP-LLM06"},
+				ExitCode:       1,
+			}
+			_ = ffe.Render(os.Stderr, asJSON, showWhy)
+			os.Exit(1)
+		}
+	}
+
+	var validatedKeylessProxy string
+	if keylessProxy != "" {
+		ap, err := profile.ValidateKeylessProxyAddr(keylessProxy)
+		if err != nil {
+			ffe := &ux.FixForwardError{
+				Tool:           "airlock",
+				Code:           "AIRLOCK_INVALID_KEYLESS_PROXY",
+				Summary:        err.Error(),
+				RemediationCmd: "airlock run --profile untrusted-agent --keyless-proxy 127.0.0.1:8443 -- <cmd>",
+				WhyOneLiner:    "Keyless proxies must bind strictly to a canonical loopback IP and port (127.0.0.1:<port> or [::1]:<port>).",
+				DeepWhy:        "Airlock validates --keyless-proxy via netip.ParseAddrPort and rejects hostnames, remote IPs, and non-loopback addresses to prevent credential redirection or DNS rebinding.",
+				References:     []string{"RFC-2026-11-27-70", "CWE-918"},
+				ExitCode:       1,
+			}
+			_ = ffe.Render(os.Stderr, asJSON, showWhy)
+			os.Exit(1)
+		}
+		validatedKeylessProxy = ap.String()
+		allowedLoopbackPorts = append(allowedLoopbackPorts, int(ap.Port()))
+	}
+
+	isUntrustedAgent := strings.EqualFold(profileName, config.ProfileUntrustedAgent) || strings.EqualFold(profileName, "untrusted_agent")
+	if isUntrustedAgent {
+		if allowDirectNet {
+			ffe := &ux.FixForwardError{
+				Tool:           "airlock",
+				Code:           "AIRLOCK_UNTRUSTED_DIRECT_NET_FORBIDDEN",
+				Summary:        "Direct unrestricted networking (--net) is forbidden under --profile untrusted-agent",
+				RemediationCmd: "airlock run --profile untrusted-agent --allow-egress api.anthropic.com -- <cmd>",
+				WhyOneLiner:    "Untrusted agent frameworks must declare explicit API egress hosts or a loopback keyless proxy.",
+				DeepWhy:        "The untrusted-agent profile enforces WAN=DENY by default and prohibits raw unrestricted outbound sockets so third-party frameworks cannot exfiltrate workspace code or credentials.",
+				References:     []string{"RFC-2026-11-27-70", "OWASP-LLM06"},
+				ExitCode:       1,
+			}
+			_ = ffe.Render(os.Stderr, asJSON, showWhy)
+			os.Exit(1)
+		}
+		if len(egressHosts) == 0 && validatedKeylessProxy == "" {
+			airgap = true
+			extraDomains = nil
+		} else {
+			airgap = false
+			extraDomains = egressHosts
+		}
+	} else if len(egressHosts) > 0 {
+		extraDomains = append(extraDomains, egressHosts...)
+	}
+
 	if allowDomains != "" {
 		for _, d := range strings.Split(allowDomains, ",") {
 			if trimmed := strings.TrimSpace(d); trimmed != "" {
@@ -456,6 +531,8 @@ func handleRun(args []string) {
 		AllowedUnixSockets:   allowedUnixSockets,
 		AllowedLoopbackPorts: allowedLoopbackPorts,
 		AllowedDomains:       extraDomains,
+		AllowEgressHosts:     egressHosts,
+		KeylessProxyAddr:     validatedKeylessProxy,
 		KeepEnv:              keptEnvVars,
 		DenyEnv:              deniedEnvVars,
 		ExtraAllowRead:       extraAllowRead,
@@ -611,7 +688,8 @@ func handleProfile(args []string) {
 	fmt.Println("Airlock Execution Profiles:")
 	fmt.Println("  standard     Baseline hardened sandbox for modern language runtimes (Go, Rust, Node, Python)")
 	fmt.Println("  agent        Autonomous coding assistants with anti-loopback and model API egress")
-	fmt.Println("  dev-agent    Autonomous coding agents with host credential masking (SSH, AWS, GPG, GitHub CLI)")
+	fmt.Println("  dev-agent       Autonomous coding agents with host credential masking (SSH, AWS, GPG, GitHub CLI)")
+	fmt.Println("  untrusted-agent Strict confinement for third-party agent frameworks (immutable PATH, SSH/rc lock, WAN=DENY)")
 	fmt.Println("  mcp-gateway  Model Context Protocol gateways with anti-loopback and credential isolation")
 	fmt.Println("  web-worker   Web application runtimes defended against webshell execution (AntiFox defense)")
 	fmt.Println("  strict       Strict pre-execution vetting and minimal filesystem mutations")

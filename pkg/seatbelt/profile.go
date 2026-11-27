@@ -368,6 +368,8 @@ func (g *ProfileGenerator) Generate(p Params) (string, error) {
 		strings.EqualFold(p.Profile, "anti_loopback") ||
 		strings.EqualFold(p.Profile, "dev-agent") ||
 		strings.EqualFold(p.Profile, "dev_agent") ||
+		strings.EqualFold(p.Profile, "untrusted-agent") ||
+		strings.EqualFold(p.Profile, "untrusted_agent") ||
 		strings.EqualFold(p.Profile, "mcp-gateway") ||
 		strings.EqualFold(p.Profile, "mcp_gateway") ||
 		strings.EqualFold(p.Profile, "agent") ||
@@ -411,6 +413,7 @@ func (g *ProfileGenerator) Generate(p Params) (string, error) {
 
 	selectedTemplate := profileTemplate
 	if strings.EqualFold(p.Profile, "dev-agent") || strings.EqualFold(p.Profile, "dev_agent") ||
+		strings.EqualFold(p.Profile, "untrusted-agent") || strings.EqualFold(p.Profile, "untrusted_agent") ||
 		strings.EqualFold(p.Profile, "mcp-gateway") || strings.EqualFold(p.Profile, "mcp_gateway") {
 		selectedTemplate = devAgentProfileTemplate
 	} else if strings.EqualFold(p.Profile, "mcp") || strings.EqualFold(p.Profile, "mcp-wrap") || strings.EqualFold(p.Profile, "mcp_wrap") {

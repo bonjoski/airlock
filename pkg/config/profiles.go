@@ -7,16 +7,17 @@ import (
 
 // Standard Profile Names
 const (
-	ProfileStandard     = "standard"
-	ProfileAgent        = "agent"
-	ProfileDevAgent     = "dev-agent"
-	ProfileMCPGateway   = "mcp-gateway"
-	ProfileMCP          = "mcp"
-	ProfileWebWorker    = "web-worker"
-	ProfileDefault      = "default"
-	ProfileStrict       = "strict"
-	ProfileAirgap       = "airgap"
-	ProfileAntiLoopback = "anti-loopback"
+	ProfileStandard       = "standard"
+	ProfileAgent          = "agent"
+	ProfileDevAgent       = "dev-agent"
+	ProfileUntrustedAgent = "untrusted-agent"
+	ProfileMCPGateway     = "mcp-gateway"
+	ProfileMCP            = "mcp"
+	ProfileWebWorker      = "web-worker"
+	ProfileDefault        = "default"
+	ProfileStrict         = "strict"
+	ProfileAirgap         = "airgap"
+	ProfileAntiLoopback   = "anti-loopback"
 )
 
 // StandardDefaultAllowDomains lists the essential registries and code repositories
@@ -127,6 +128,32 @@ var DevAgentDefaultSecrets = []string{
 	"ANTHROPIC_API_KEY",
 	"GITHUB_TOKEN",
 	"GEMINI_API_KEY",
+}
+
+// UntrustedAgentDefaultDenyPaths defines forbidden host credential directories, SSH persistence,
+// shell rc files, LaunchAgents, and cron paths for untrusted-agent (RFC-2026-11-27-70).
+var UntrustedAgentDefaultDenyPaths = []string{
+	"~/.ssh",
+	"~/.ssh/authorized_keys",
+	"~/.aws",
+	"~/.gnupg",
+	"~/.kube",
+	"~/.config/gh",
+	"~/.config/gcloud",
+	"~/.azure",
+	"~/.bashrc",
+	"~/.zshrc",
+	"~/.profile",
+	"~/Library/LaunchAgents",
+	"/etc/crontab",
+	"/etc/cron.d",
+	"/etc/cron.daily",
+	"/etc/cron.hourly",
+	"/etc/cron.weekly",
+	"/etc/cron.monthly",
+	"/var/run/docker.sock",
+	".env",
+	".env.*",
 }
 
 // MCPGatewayDefaultDenyPaths defines forbidden host credential directories for mcp-gateway (CVE-2026-125926).
@@ -361,8 +388,34 @@ func GetBuiltinProfile(name string) (*Config, error) {
 
 		return cfg, nil
 
+	case ProfileUntrustedAgent, "untrusted_agent":
+		cfg := DefaultConfig()
+		cfg.Version = "1"
+		cfg.Mode = ModeStrict
+
+		// 1. Network: Default WAN=DENY (airgap=true) until explicit --allow-egress or --keyless-proxy is declared
+		cfg.Network.Airgap = true
+		cfg.Network.AntiLoopback = true
+		cfg.Network.AllowDomains = nil
+		cfg.Network.UnknownDomainAction = "refused"
+
+		// 2. Filesystem: Strict host credential, SSH persistence, shell rc, LaunchAgents & cron lockdown
+		cfg.Filesystem.DenyRead = make([]string, len(UntrustedAgentDefaultDenyPaths))
+		copy(cfg.Filesystem.DenyRead, UntrustedAgentDefaultDenyPaths)
+		cfg.Filesystem.DenyWrite = append(append([]string(nil), UntrustedAgentDefaultDenyPaths...), ".git")
+
+		// 3. Static Analysis: Mandatory strict pre-execution inspection
+		cfg.Vetting.Enable = true
+		cfg.Vetting.Strict = true
+
+		// 4. Interactive: Non-interactive fail-closed defaults
+		cfg.Interactive.PromptOnUnknownDomain = false
+		cfg.Interactive.PromptTimeoutSec = 5
+
+		return cfg, nil
+
 	default:
-		return nil, fmt.Errorf("unknown execution profile %q (available: standard, agent, dev-agent, mcp-gateway, mcp, web-worker, strict, airgap, anti-loopback, default)", name)
+		return nil, fmt.Errorf("unknown execution profile %q (available: standard, agent, dev-agent, untrusted-agent, mcp-gateway, mcp, web-worker, strict, airgap, anti-loopback, default)", name)
 	}
 }
 

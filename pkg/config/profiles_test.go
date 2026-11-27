@@ -261,3 +261,36 @@ func TestGetBuiltinProfile_WebWorker(t *testing.T) {
 		}
 	}
 }
+
+func TestGetBuiltinProfile_UntrustedAgent(t *testing.T) {
+	for _, name := range []string{ProfileUntrustedAgent, "untrusted_agent"} {
+		cfg, err := GetBuiltinProfile(name)
+		if err != nil {
+			t.Fatalf("expected profile %q to load, got error: %v", name, err)
+		}
+		if cfg.Mode != ModeStrict {
+			t.Fatalf("expected ModeStrict, got %s", cfg.Mode)
+		}
+		if !cfg.Network.Airgap {
+			t.Fatalf("untrusted-agent must default to WAN=DENY (Airgap=true)")
+		}
+		if !cfg.Network.AntiLoopback {
+			t.Fatalf("untrusted-agent must enforce anti-loopback")
+		}
+		if len(cfg.Network.AllowDomains) != 0 {
+			t.Fatalf("untrusted-agent must have zero default allow_domains, got %v", cfg.Network.AllowDomains)
+		}
+		for _, req := range []string{"~/.ssh", "~/.ssh/authorized_keys", "~/.bashrc", "~/.zshrc", "~/.profile", "~/Library/LaunchAgents", "/etc/crontab", "/var/run/docker.sock"} {
+			found := false
+			for _, p := range cfg.Filesystem.DenyRead {
+				if p == req {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("untrusted-agent missing required deny path %q", req)
+			}
+		}
+	}
+}

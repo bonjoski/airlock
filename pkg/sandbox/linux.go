@@ -182,6 +182,8 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 			strings.EqualFold(l.opts.Profile, "agent") ||
 			strings.EqualFold(l.opts.Profile, "dev-agent") ||
 			strings.EqualFold(l.opts.Profile, "dev_agent") ||
+			strings.EqualFold(l.opts.Profile, "untrusted-agent") ||
+			strings.EqualFold(l.opts.Profile, "untrusted_agent") ||
 			strings.EqualFold(l.opts.Profile, "mcp") ||
 			strings.EqualFold(l.opts.Profile, "mcp-wrap") ||
 			strings.EqualFold(l.opts.Profile, "mcp_wrap") ||
@@ -368,6 +370,12 @@ func (l *LinuxEngine) BuildBwrapArgs(sc scratch.Manager, seccompFile *os.File, u
 			"--tmpfs", "/proc/sys",
 			"--ro-bind-try", unreadableMask, "/proc/kcore",
 		)
+	case strings.EqualFold(l.opts.Profile, "untrusted-agent") || strings.EqualFold(l.opts.Profile, "untrusted_agent"):
+		args = profile.AugmentBwrapArgsForUntrustedAgent(args, userHome, unreadableMask, profile.UntrustedAgentConfig{
+			WorkDir:          l.opts.WorkspaceRoot,
+			AllowEgressHosts: l.opts.AllowEgressHosts,
+			KeylessProxyAddr: l.opts.KeylessProxyAddr,
+		})
 	}
 
 	// Ensure child terminates when supervisor exits
@@ -534,6 +542,17 @@ func (l *LinuxEngine) Execute(ctx context.Context, cmdArgs []string) (int, error
 	}
 	sanitizer := env.NewSanitizer(envConfig)
 	sanitizedEnv := sanitizer.Sanitize(os.Environ())
+	if strings.EqualFold(l.opts.Profile, "untrusted-agent") || strings.EqualFold(l.opts.Profile, "untrusted_agent") {
+		uaCfg := profile.UntrustedAgentConfig{
+			WorkDir:          l.opts.WorkspaceRoot,
+			AllowEgressHosts: l.opts.AllowEgressHosts,
+			KeylessProxyAddr: l.opts.KeylessProxyAddr,
+		}
+		sanitizedEnv, err = profile.BuildUntrustedAgentEnv(sanitizedEnv, uaCfg)
+		if err != nil {
+			return 1, fmt.Errorf("sandbox: failed to build untrusted-agent environment: %w", err)
+		}
+	}
 
 	// 7b. Ephemeral Secret Leasing (ETX / Locksmith Integration)
 	if len(l.opts.LeasedSecrets) > 0 {

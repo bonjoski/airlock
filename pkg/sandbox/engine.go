@@ -31,6 +31,8 @@ type SandboxOpts struct {
 	AllowedUnixSockets   []string
 	AllowedLoopbackPorts []int
 	AllowedDomains       []string
+	AllowEgressHosts     []string // Declared API hostnames for untrusted-agent profile (RFC-2026-11-27-70)
+	KeylessProxyAddr     string   // Validated loopback ip:port for keyless proxy mode (RFC-2026-11-27-70)
 	KeepEnv              []string
 	DenyEnv              []string
 	ExtraAllowRead       []string

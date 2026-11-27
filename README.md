@@ -205,7 +205,8 @@ Every primary developer use case is documented with copy-pasteable commands and 
 | :--- | :--- | :--- |
 | **Fast Linter & Formatter Confinement** | Run linters with sub-15ms overhead and zero network egress:<br/>`airlock run --profile linter -- gofmt -w .` | [Guide](docs/use-cases/01-fast-linter-sandboxing.md) |
 | **Sandboxed Package Managers** | Isolate package installs and prevent credential theft from postinstall scripts:<br/>`airlock run --profile node -- npm install` | [Guide](docs/use-cases/02-sandboxed-package-managers.md) |
-| **Pre-Flight Command Vetting** | Inspect dependencies and required permissions before executing:<br/>`airlock vet -- npm install lodash` | [Guide](docs/use-cases/03-preflight-policy-vetting.md) |
+| **Pre-Flight Command & Hard-Boundary Linting (`--strict`)** | Inspect dependencies and lint compiled Seatbelt/Landlock profiles against Siren misconfiguration anti-patterns (exits `30` on findings):<br/>`airlock vet --strict --dir .` | [Guide](docs/use-cases/03-preflight-policy-vetting.md) |
+| **Untrusted Agent Framework Confinement** | Jail third-party local agent runtimes with immutable `PATH`, SSH/rc lock, ambient secret scrub, and declared-API-only egress (`WAN=DENY` by default):<br/>`airlock run --profile untrusted-agent --allow-egress api.anthropic.com -- <cmd>` | [Guide](docs/use-cases/confinement-for-untrusted-agent-frameworks.md) |
 | **Strict No-Network Code Exploration** | Enable autonomous agents to explore code while blocking exfiltration:<br/>`airlock run --profile offline-reader -- rg "TODO" src/` | [Guide](docs/use-cases/04-offline-code-exploration.md) |
 | **Custom Declarative Sandbox Profiles** | Compile custom cross-platform Seatbelt/Landlock YAML profiles:<br/>`airlock profile create corporate-build --template standard-dev` | [Guide](docs/use-cases/05-custom-sandbox-profiles.md) |
 | **Calm Confinement Explanations (`--why`)** | Inspect why a host credential or worktree path was blocked with progressive disclosure:<br/>`airlock explain ssh --why` | [CLI Contract](#calm-sandbox-denials--progressive-disclosure---why) |
@@ -343,6 +344,8 @@ airlock run --allow-domain api.openai.com -- python agent.py
 
 # Run with specialized security execution profiles
 airlock run --profile dev-agent -- claude
+airlock run --profile untrusted-agent --allow-egress api.anthropic.com -- uvx <agent-framework>
+airlock run --profile untrusted-agent --keyless-proxy 127.0.0.1:8443 -- uvx <agent-framework>
 airlock run --profile mcp-gateway -- mcp-server
 airlock run --profile web-worker -- node server.js
 ```
@@ -399,17 +402,17 @@ network:
   unknown_domain_action: "refused"
 ```
 
-### 5. `airlock vet` (Argus Threat Engine)
-Run Argus static supply chain threat detection across workspace manifests and source code:
+### 5. `airlock vet` (Argus Threat Engine & Siren Hard-Boundary Linter)
+Run Argus static supply chain threat detection and post-compilation Siren sandbox profile linting across workspace manifests and compiled Seatbelt/Landlock policies:
 ```bash
-# Scan current workspace
-airlock vet
+# Scan current workspace and lint compiled sandbox profile (exits 30 on Siren misconfigs)
+airlock vet --strict --dir .
 
-# Strict mode (fails on warnings/medium severity threats)
-airlock vet --strict
+# Output machine-readable JSON for CI/CD gates (includes siren_findings & fix_forward_error)
+airlock vet --strict --dir . --json
 
-# Output machine-readable JSON for CI/CD gates
-airlock vet --json --workspace /path/to/project
+# Progressive disclosure of all Siren findings and remediation steps
+airlock vet --strict --dir . --why
 
 # Vet command string before executing
 airlock vet -- npm install suspicious-package
@@ -432,6 +435,7 @@ Supported profiles:
 - `standard`: Baseline hardened development sandbox with modern language registries permitted.
 - `agent`: Autonomous coding assistants with anti-loopback and LLM API egress.
 - `dev-agent`: Autonomous coding agents with strict credential isolation (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.config/gh`).
+- `untrusted-agent`: Strict confinement for third-party agent frameworks (immutable `PATH`, ambient secret & linker scrubbing, `~/.ssh/authorized_keys` / shell rc / LaunchAgents / `/etc/cron*` lockdown, default `WAN=DENY`, `--allow-egress` / loopback `--keyless-proxy`).
 - `mcp-gateway`: Model Context Protocol servers/registries with anti-loopback and credential isolation (CVE-2026-125926).
 - `web-worker`: Web application runtimes defended against child webshell execution (AntiFox defense).
 - `strict`: Strict pre-execution AST vetting and minimal filesystem mutations.
